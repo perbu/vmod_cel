@@ -1,24 +1,25 @@
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use varnish::vcl::Ctx;
 
-mod request_attrs;
-mod policy_engine;
+mod bundle;
 mod cel_engine;
 mod cel_functions;
-mod safety_limits;
-mod bundle;
 mod loader;
 mod panic_safety;
+mod policy_engine;
+mod request_attrs;
+mod safety_limits;
 
-
-pub use request_attrs::{RequestAttrs, AttributeBuilder, AttributeConfig};
-pub use policy_engine::{PolicyEngine, CompiledProgram, EvalResult};
+pub use bundle::{BundleMetadata, CompiledRule, Rule, RuleBundle, RuleSet};
 pub use cel_engine::CelRustEngine;
-pub use safety_limits::{SafetyLimits, CostTracker};
-pub use bundle::{RuleBundle, Rule, BundleMetadata, RuleSet, CompiledRule};
-pub use loader::{BundleLoader, RuleSetSwapper, BundleFormat, LoadError};
-pub use panic_safety::{PanicSafeWrapper, CircuitBreaker, ErrorRecovery, RecoveryStrategy, CircuitState};
+pub use loader::{BundleFormat, BundleLoader, LoadError, RuleSetSwapper};
+pub use panic_safety::{
+    CircuitBreaker, CircuitState, ErrorRecovery, PanicSafeWrapper, RecoveryStrategy,
+};
+pub use policy_engine::{CompiledProgram, EvalResult, PolicyEngine};
+pub use request_attrs::{AttributeBuilder, AttributeConfig, RequestAttrs};
+pub use safety_limits::{CostTracker, SafetyLimits};
 
 pub struct CelConfig {
     pub enable_explain: bool,
@@ -54,6 +55,12 @@ impl CelConfig {
     }
 }
 
+impl Default for CelConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct CelMetrics {
     pub compiles_ok: AtomicU64,
     pub compiles_err: AtomicU64,
@@ -75,6 +82,12 @@ impl CelMetrics {
             reload_ok: AtomicU64::new(0),
             reload_err: AtomicU64::new(0),
         }
+    }
+}
+
+impl Default for CelMetrics {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -140,10 +153,14 @@ impl CelState {
 
         // Compile the expression using the CEL engine
         let start_time = std::time::Instant::now();
-        let program = self.engine.compile(name, expression)
+        let program = self
+            .engine
+            .compile(name, expression)
             .map_err(|e| e.to_string())?;
         let compile_time_us = start_time.elapsed().as_micros() as u64;
-        let estimated_cost = self.engine.estimate_cost(expression)
+        let estimated_cost = self
+            .engine
+            .estimate_cost(expression)
             .map_err(|e| e.to_string())?;
 
         let compiled_rule = CompiledRule {
@@ -175,16 +192,20 @@ impl CelState {
         // Execute with panic protection
         let evaluation_result = self.panic_wrapper.execute_safe(|| {
             // Get the compiled rule
-            let compiled_rule = self.rules.get_rule(rule_name)
+            let compiled_rule = self
+                .rules
+                .get_rule(rule_name)
                 .ok_or_else(|| format!("Rule '{}' not found", rule_name))?;
 
             // Extract request attributes
             let attr_builder = AttributeBuilder::new(self.config.attribute_config.clone());
-            let attrs = attr_builder.extract(ctx)
+            let attrs = attr_builder
+                .extract(ctx)
                 .map_err(|e| format!("Failed to extract request attributes: {}", e))?;
 
             // Evaluate the compiled CEL program
-            self.engine.eval(&compiled_rule.program, &attrs)
+            self.engine
+                .eval(&compiled_rule.program, &attrs)
                 .map_err(|e| format!("CEL evaluation failed: {}", e))
         });
 
@@ -232,11 +253,15 @@ impl CelState {
         let evaluation_result = self.panic_wrapper.execute_safe(|| {
             // Extract request attributes once for all rules
             let attr_builder = AttributeBuilder::new(self.config.attribute_config.clone());
-            let attrs = attr_builder.extract(ctx)
+            let attrs = attr_builder
+                .extract(ctx)
                 .map_err(|e| format!("Failed to extract request attributes: {}", e))?;
 
             // Get all enabled rules
-            let enabled_rules: Vec<_> = self.rules.programs.iter()
+            let enabled_rules: Vec<_> = self
+                .rules
+                .programs
+                .iter()
                 .filter(|(_, rule)| rule.rule.enabled)
                 .collect();
 
@@ -297,11 +322,15 @@ impl CelState {
         let evaluation_result = self.panic_wrapper.execute_safe(|| {
             // Extract request attributes once for all rules
             let attr_builder = AttributeBuilder::new(self.config.attribute_config.clone());
-            let attrs = attr_builder.extract(ctx)
+            let attrs = attr_builder
+                .extract(ctx)
                 .map_err(|e| format!("Failed to extract request attributes: {}", e))?;
 
             // Get all enabled rules
-            let enabled_rules: Vec<_> = self.rules.programs.iter()
+            let enabled_rules: Vec<_> = self
+                .rules
+                .programs
+                .iter()
                 .filter(|(_, rule)| rule.rule.enabled)
                 .collect();
 
@@ -377,7 +406,11 @@ impl CelState {
                 format!(
                     "Rule '{}': {} | Expression: '{}' | Result: {} | Cost: {}",
                     rule_name,
-                    compiled_rule.rule.description.as_deref().unwrap_or("No description"),
+                    compiled_rule
+                        .rule
+                        .description
+                        .as_deref()
+                        .unwrap_or("No description"),
                     compiled_rule.rule.expr,
                     result,
                     compiled_rule.estimated_cost
@@ -408,9 +441,9 @@ impl CelState {
             error_recovery_count: error_stats.recovery_success_count,
             circuit_breaker_state: format!("{:?}", circuit_state),
             circuit_failure_count: failure_count,
-            total_evaluations: self.metrics.eval_true.load(Ordering::Relaxed) +
-                             self.metrics.eval_false.load(Ordering::Relaxed) +
-                             self.metrics.eval_err.load(Ordering::Relaxed),
+            total_evaluations: self.metrics.eval_true.load(Ordering::Relaxed)
+                + self.metrics.eval_false.load(Ordering::Relaxed)
+                + self.metrics.eval_err.load(Ordering::Relaxed),
         }
     }
 }
@@ -452,7 +485,11 @@ impl SafetyStatus {
     }
 
     pub fn format_status(&self) -> String {
-        let health = if self.is_healthy() { "✅ HEALTHY" } else { "⚠️ DEGRADED" };
+        let health = if self.is_healthy() {
+            "✅ HEALTHY"
+        } else {
+            "⚠️ DEGRADED"
+        };
 
         format!(
             "{}\nEvaluations: {} | Panics: {} | Errors: {} (Recovered: {}) | Circuit: {} (Failures: {})",
@@ -505,21 +542,17 @@ mod cel {
         }
     }
 
-
-
-
-
     /// Configure attribute extraction settings
     pub fn configure_attributes(
         extract_cookies: bool,
         max_headers: i64,
         max_header_size: i64,
     ) -> Result<(), String> {
-        if max_headers < 1 || max_headers > 1000 {
+        if !(1..=1000).contains(&max_headers) {
             return Err("max_headers must be between 1 and 1000".to_string());
         }
 
-        if max_header_size < 1024 || max_header_size > 1048576 {
+        if !(1024..=1048576).contains(&max_header_size) {
             return Err("max_header_size must be between 1KB and 1MB".to_string());
         }
 
@@ -556,8 +589,6 @@ mod cel {
             None => "VMOD not initialized".to_string(),
         }
     }
-
-
 
     /// Evaluate all enabled rules, returning true if ANY match (logical OR)
     pub fn eval_any(ctx: &mut Ctx) -> bool {
@@ -615,8 +646,6 @@ mod cel {
         cel_state.eval_all_rule(ctx).unwrap_or(true)
     }
 
-
-
     /// Get safety and stability status (Phase 6)
     pub fn safety_status() -> String {
         let guard = match CEL_STATE.lock() {
@@ -634,7 +663,6 @@ mod cel {
             None => "VMOD not initialized".to_string(),
         }
     }
-
 }
 
 // VTC tests will be added back in Phase 2c

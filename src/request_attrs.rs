@@ -6,10 +6,8 @@ use varnish_sys::vcl::StrOrBytes;
 fn str_or_bytes_to_string(value: StrOrBytes<'_>) -> String {
     match value {
         StrOrBytes::Utf8(s) => s.to_string(),
-        StrOrBytes::Bytes(bytes) => {
-            String::from_utf8(bytes.to_vec())
-                .unwrap_or_else(|_| String::from_utf8_lossy(bytes).to_string())
-        }
+        StrOrBytes::Bytes(bytes) => String::from_utf8(bytes.to_vec())
+            .unwrap_or_else(|_| String::from_utf8_lossy(bytes).to_string()),
     }
 }
 
@@ -35,11 +33,11 @@ pub struct AttributeConfig {
 impl Default for AttributeConfig {
     fn default() -> Self {
         Self {
-            extract_cookies: false,        // Opt-in for performance
-            max_headers: 50,               // Reasonable limit
-            max_header_value_size: 8192,   // 8KB per header
-            max_cookie_count: 20,          // Reasonable cookie limit
-            max_total_header_size: 65536,  // 64KB total headers
+            extract_cookies: false,       // Opt-in for performance
+            max_headers: 50,              // Reasonable limit
+            max_header_value_size: 8192,  // 8KB per header
+            max_cookie_count: 20,         // Reasonable cookie limit
+            max_total_header_size: 65536, // 64KB total headers
         }
     }
 }
@@ -104,7 +102,7 @@ impl RequestAttrs {
 
     /// Check if cookie exists
     pub fn has_cookie(&self, name: &str) -> bool {
-        self.cookies.as_ref().map_or(false, |c| c.contains_key(name))
+        self.cookies.as_ref().is_some_and(|c| c.contains_key(name))
     }
 
     /// Get query parameter (simple key=value parsing)
@@ -145,19 +143,24 @@ impl AttributeBuilder {
     pub fn extract(&self, ctx: &Ctx) -> Result<RequestAttrs, String> {
         let start_time = std::time::Instant::now();
 
-        let req = ctx.http_req.as_ref()
+        let req = ctx
+            .http_req
+            .as_ref()
             .ok_or_else(|| "No request context available".to_string())?;
 
         // Extract core request data
-        let method = req.method()
+        let method = req
+            .method()
             .map(|m| str_or_bytes_to_string(m))
             .unwrap_or_else(|| "UNKNOWN".to_string());
 
-        let full_url = req.url()
+        let full_url = req
+            .url()
             .map(|u| str_or_bytes_to_string(u))
             .unwrap_or_else(|| "/".to_string());
 
-        let protocol = req.proto()
+        let protocol = req
+            .proto()
             .map(|p| str_or_bytes_to_string(p))
             .unwrap_or_else(|| "HTTP/1.1".to_string());
 
@@ -169,7 +172,8 @@ impl AttributeBuilder {
 
         // Extract network info
         let client_ip = self.extract_client_ip(req);
-        let user_agent = req.header("user-agent")
+        let user_agent = req
+            .header("user-agent")
             .map(|ua| str_or_bytes_to_string(ua));
 
         // Extract cookies if configured
@@ -212,7 +216,10 @@ impl AttributeBuilder {
     }
 
     /// Extract and normalize headers with safety limits
-    fn extract_headers(&self, req: &varnish::vcl::HttpHeaders) -> Result<(HashMap<String, String>, usize, usize), String> {
+    fn extract_headers(
+        &self,
+        req: &varnish::vcl::HttpHeaders,
+    ) -> Result<(HashMap<String, String>, usize, usize), String> {
         let mut headers = HashMap::new();
         let mut header_count = 0;
         let mut total_size = 0;
@@ -275,7 +282,10 @@ impl AttributeBuilder {
     }
 
     /// Extract and parse cookies with safety limits
-    fn extract_cookies(&self, req: &varnish::vcl::HttpHeaders) -> Result<Option<HashMap<String, String>>, String> {
+    fn extract_cookies(
+        &self,
+        req: &varnish::vcl::HttpHeaders,
+    ) -> Result<Option<HashMap<String, String>>, String> {
         let cookie_header = match req.header("cookie") {
             Some(cookies) => str_or_bytes_to_string(cookies),
             None => return Ok(None),
@@ -296,7 +306,7 @@ impl AttributeBuilder {
 
                 // Basic cookie value unquoting
                 let value = if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
-                    value[1..value.len()-1].to_string()
+                    value[1..value.len() - 1].to_string()
                 } else {
                     value
                 };
@@ -306,7 +316,11 @@ impl AttributeBuilder {
             }
         }
 
-        Ok(if cookies.is_empty() { None } else { Some(cookies) })
+        Ok(if cookies.is_empty() {
+            None
+        } else {
+            Some(cookies)
+        })
     }
 }
 
@@ -326,10 +340,18 @@ mod tests {
     #[test]
     fn test_header_lookup() {
         let mut attrs = RequestAttrs::empty();
-        attrs.headers.insert("content-type".to_string(), "application/json".to_string());
+        attrs
+            .headers
+            .insert("content-type".to_string(), "application/json".to_string());
 
-        assert_eq!(attrs.get_header("Content-Type"), Some(&"application/json".to_string()));
-        assert_eq!(attrs.get_header("CONTENT-TYPE"), Some(&"application/json".to_string()));
+        assert_eq!(
+            attrs.get_header("Content-Type"),
+            Some(&"application/json".to_string())
+        );
+        assert_eq!(
+            attrs.get_header("CONTENT-TYPE"),
+            Some(&"application/json".to_string())
+        );
         assert!(attrs.has_header("content-type"));
         assert!(attrs.has_header("Content-Type"));
         assert!(!attrs.has_header("authorization"));

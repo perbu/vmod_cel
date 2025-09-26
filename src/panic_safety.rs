@@ -46,7 +46,10 @@ impl PanicSafeWrapper {
                 // Log the panic for debugging (in production, this would go to Varnish logs)
                 eprintln!("CEL: Panic caught and recovered: {}", panic_msg);
 
-                Err(format!("CEL operation failed due to internal error: {}", panic_msg))
+                Err(format!(
+                    "CEL operation failed due to internal error: {}",
+                    panic_msg
+                ))
             }
         }
     }
@@ -77,51 +80,6 @@ impl Default for PanicSafeWrapper {
 pub struct PanicStats {
     pub panic_count: u64,
     pub recovery_count: u64,
-}
-
-/// Resource exhaustion protection
-pub struct ResourceGuard {
-    max_memory_bytes: usize,
-    max_cpu_time_ms: u64,
-    max_stack_depth: usize,
-}
-
-impl ResourceGuard {
-    pub fn new(max_memory_bytes: usize, max_cpu_time_ms: u64, max_stack_depth: usize) -> Self {
-        Self {
-            max_memory_bytes,
-            max_cpu_time_ms,
-            max_stack_depth,
-        }
-    }
-
-    /// Check if resource usage is within limits
-    pub fn check_resources(&self) -> Result<(), String> {
-        // In a full implementation, this would check:
-        // - Current memory usage via malloc stats or custom allocator
-        // - CPU time via getrusage or similar
-        // - Stack depth via custom tracking
-
-        // For now, we'll do basic checks
-        self.check_stack_depth()?;
-
-        Ok(())
-    }
-
-    fn check_stack_depth(&self) -> Result<(), String> {
-        // Simple stack overflow protection
-        // In practice, this would track call stack depth
-        let dummy_var = 0;
-        let stack_ptr = &dummy_var as *const i32 as usize;
-
-        // This is a very basic check - in production you'd want more sophisticated tracking
-        if stack_ptr % 8192 == 0 {
-            // Arbitrary check for demonstration
-            return Err("Stack depth limit approached".to_string());
-        }
-
-        Ok(())
-    }
 }
 
 /// Error recovery strategies
@@ -196,9 +154,9 @@ pub struct CircuitBreaker {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CircuitState {
-    Closed,    // Normal operation
-    Open,      // Failing, rejecting requests
-    HalfOpen,  // Testing if service recovered
+    Closed,   // Normal operation
+    Open,     // Failing, rejecting requests
+    HalfOpen, // Testing if service recovered
 }
 
 impl CircuitBreaker {
@@ -354,13 +312,5 @@ mod tests {
         breaker.record_failure();
         assert_eq!(breaker.get_state(), CircuitState::Open);
         assert!(breaker.allow_request().is_err());
-    }
-
-    #[test]
-    fn test_resource_guard_basic_check() {
-        let guard = ResourceGuard::new(1024 * 1024, 1000, 100);
-
-        // Basic resource check should pass
-        assert!(guard.check_resources().is_ok());
     }
 }

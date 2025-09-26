@@ -60,41 +60,49 @@ impl CelRustEngine {
         })
     }
 
-
     /// Create a CEL evaluation context from request attributes
     fn create_eval_context(&self, attrs: &RequestAttrs) -> Result<Context, CelError> {
         let mut eval_context = Context::default();
 
         // Add request attributes as variables
-        eval_context.add_variable("method", attrs.method.as_str()).map_err(|e| CelError::EvaluationFailed {
-            message: format!("Failed to add method variable: {}", e),
-        })?;
+        eval_context
+            .add_variable("method", attrs.method.as_str())
+            .map_err(|e| CelError::EvaluationFailed {
+                message: format!("Failed to add method variable: {}", e),
+            })?;
 
-        eval_context.add_variable("path", attrs.path.as_str()).map_err(|e| CelError::EvaluationFailed {
-            message: format!("Failed to add path variable: {}", e),
-        })?;
+        eval_context
+            .add_variable("path", attrs.path.as_str())
+            .map_err(|e| CelError::EvaluationFailed {
+                message: format!("Failed to add path variable: {}", e),
+            })?;
 
         if let Some(ref query) = attrs.query {
-            eval_context.add_variable("query", query.as_str()).map_err(|e| CelError::EvaluationFailed {
-                message: format!("Failed to add query variable: {}", e),
-            })?;
+            eval_context
+                .add_variable("query", query.as_str())
+                .map_err(|e| CelError::EvaluationFailed {
+                    message: format!("Failed to add query variable: {}", e),
+                })?;
         }
 
         if let Some(ref client_ip) = attrs.client_ip {
-            eval_context.add_variable("client_ip", client_ip.as_str()).map_err(|e| CelError::EvaluationFailed {
-                message: format!("Failed to add client_ip variable: {}", e),
-            })?;
+            eval_context
+                .add_variable("client_ip", client_ip.as_str())
+                .map_err(|e| CelError::EvaluationFailed {
+                    message: format!("Failed to add client_ip variable: {}", e),
+                })?;
         }
 
         if let Some(ref user_agent) = attrs.user_agent {
-            eval_context.add_variable("user_agent", user_agent.as_str()).map_err(|e| CelError::EvaluationFailed {
-                message: format!("Failed to add user_agent variable: {}", e),
-            })?;
+            eval_context
+                .add_variable("user_agent", user_agent.as_str())
+                .map_err(|e| CelError::EvaluationFailed {
+                    message: format!("Failed to add user_agent variable: {}", e),
+                })?;
         }
 
         Ok(eval_context)
     }
-
 
     /// Safely execute a function with panic recovery
     fn safe_execute<F, R>(&self, operation_name: &str, f: F) -> Result<R, CelError>
@@ -140,7 +148,8 @@ impl PolicyEngine for CelRustEngine {
 
     fn eval(&self, program: &Self::Program, attrs: &RequestAttrs) -> Result<bool, Self::Error> {
         let _start_time = Instant::now();
-        let mut _cost_tracker = CostTracker::new(self.limits.max_eval_steps, self.limits.max_eval_time);
+        let mut _cost_tracker =
+            CostTracker::new(self.limits.max_eval_steps, self.limits.max_eval_time);
 
         // Safely evaluate the expression
         self.safe_execute("eval", || {
@@ -148,9 +157,11 @@ impl PolicyEngine for CelRustEngine {
             let context = self.create_eval_context(attrs)?;
 
             // Execute the program
-            let result = program.execute(&context).map_err(|e| CelError::EvaluationFailed {
-                message: format!("CEL evaluation error: {}", e),
-            })?;
+            let result = program
+                .execute(&context)
+                .map_err(|e| CelError::EvaluationFailed {
+                    message: format!("CEL evaluation error: {}", e),
+                })?;
 
             // Convert result to boolean
             let boolean_result = match result {
@@ -158,8 +169,8 @@ impl PolicyEngine for CelRustEngine {
                 cel::Value::Int(i) => i != 0,
                 cel::Value::UInt(u) => u != 0,
                 cel::Value::String(_) => true, // Non-empty string is truthy
-                cel::Value::List(_) => true, // Non-empty list is truthy
-                cel::Value::Map(_) => true, // Non-empty map is truthy
+                cel::Value::List(_) => true,   // Non-empty list is truthy
+                cel::Value::Map(_) => true,    // Non-empty map is truthy
                 _ => false,
             };
 
@@ -276,7 +287,9 @@ mod tests {
         let attrs = create_test_attrs();
 
         // Path starts with check
-        let program = engine.compile("path_check", "path.startsWith('/api')").unwrap();
+        let program = engine
+            .compile("path_check", "path.startsWith('/api')")
+            .unwrap();
         let result = engine.eval(&program, &attrs).unwrap();
         assert!(result);
     }

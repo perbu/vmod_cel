@@ -1,16 +1,20 @@
-use vmod_cel::{BundleLoader, RuleSetSwapper, BundleFormat, LoadError};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tempfile::NamedTempFile;
-use std::io::Write;
+use vmod_cel::{BundleFormat, BundleLoader, LoadError, RuleSetSwapper};
 
 #[test]
 fn test_load_example_bundle() {
     let loader = BundleLoader::new().expect("Failed to create loader");
     let result = loader.load_file("tests/bundle_example.yaml");
 
-    assert!(result.is_ok(), "Failed to load example bundle: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to load example bundle: {:?}",
+        result.err()
+    );
 
     let rule_set = result.unwrap();
     assert_eq!(rule_set.rule_count(), 3); // Only enabled rules loaded
@@ -28,7 +32,7 @@ fn test_load_malformed_bundle() {
     assert!(result.is_err(), "Should fail to load malformed bundle");
 
     match result.unwrap_err() {
-        LoadError::ValidationError(_) => {}, // Expected
+        LoadError::ValidationError(_) => {} // Expected
         other => panic!("Expected ValidationError, got: {:?}", other),
     }
 }
@@ -42,7 +46,11 @@ fn test_atomic_swapping() {
 
     // Load valid bundle
     let result = swapper.load_and_swap("tests/bundle_example.yaml");
-    assert!(result.is_ok(), "Failed to load and swap: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to load and swap: {:?}",
+        result.err()
+    );
 
     // Verify rules were loaded
     let current = swapper.get();
@@ -102,9 +110,12 @@ fn test_background_loading() {
     let result_clone = result.clone();
 
     // Load in background
-    loader.load_file_async("tests/bundle_example.yaml", Box::new(move |load_result| {
-        *result_clone.lock().unwrap() = Some(load_result);
-    }));
+    loader.load_file_async(
+        "tests/bundle_example.yaml",
+        Box::new(move |load_result| {
+            *result_clone.lock().unwrap() = Some(load_result);
+        }),
+    );
 
     // Wait for background thread to complete
     let mut attempts = 0;
@@ -154,7 +165,11 @@ fn test_json_format_support() -> Result<(), Box<dyn std::error::Error>> {
 
     std::fs::remove_file(json_path)?;
 
-    assert!(result.is_ok(), "Failed to load JSON bundle: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to load JSON bundle: {:?}",
+        result.err()
+    );
 
     let rule_set = result.unwrap();
     assert_eq!(rule_set.rule_count(), 1);

@@ -1,11 +1,11 @@
-use crate::bundle::{RuleBundle, RuleSet, CompiledRule};
-use crate::policy_engine::PolicyEngine;
+use crate::bundle::{CompiledRule, RuleBundle, RuleSet};
 use crate::cel_engine::CelRustEngine;
+use crate::policy_engine::PolicyEngine;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -34,11 +34,10 @@ pub struct BundleLoader {
 impl BundleLoader {
     /// Create new bundle loader with default CEL engine
     pub fn new() -> Result<Self, LoadError> {
-        let engine = CelRustEngine::new()
-            .map_err(|e| LoadError::CompilationError {
-                rule: "engine_init".to_string(),
-                error: e.to_string()
-            })?;
+        let engine = CelRustEngine::new().map_err(|e| LoadError::CompilationError {
+            rule: "engine_init".to_string(),
+            error: e.to_string(),
+        })?;
 
         Ok(Self {
             engine: Arc::new(engine),
@@ -68,15 +67,12 @@ impl BundleLoader {
     fn load_from_content(&self, content: &str, format: BundleFormat) -> LoadResult<Arc<RuleSet>> {
         // Parse bundle
         let bundle = match format {
-            BundleFormat::Yaml => RuleBundle::from_yaml(content)
-                .map_err(LoadError::ParseError)?,
-            BundleFormat::Json => RuleBundle::from_json(content)
-                .map_err(LoadError::ParseError)?,
+            BundleFormat::Yaml => RuleBundle::from_yaml(content).map_err(LoadError::ParseError)?,
+            BundleFormat::Json => RuleBundle::from_json(content).map_err(LoadError::ParseError)?,
         };
 
         // Validate bundle structure
-        bundle.validate()
-            .map_err(LoadError::ValidationError)?;
+        bundle.validate().map_err(LoadError::ValidationError)?;
 
         // Compile rules (placeholder for Phase 3)
         self.compile_bundle(bundle)
@@ -86,7 +82,7 @@ impl BundleLoader {
     pub fn load_file_async<P: AsRef<Path> + Send + 'static>(
         &self,
         path: P,
-        callback: Box<dyn FnOnce(LoadResult<Arc<RuleSet>>) + Send + 'static>
+        callback: Box<dyn FnOnce(LoadResult<Arc<RuleSet>>) + Send + 'static>,
     ) {
         let path_buf = path.as_ref().to_path_buf();
 
@@ -102,7 +98,7 @@ impl BundleLoader {
         &self,
         content: String,
         format: BundleFormat,
-        callback: Box<dyn FnOnce(LoadResult<Arc<RuleSet>>) + Send + 'static>
+        callback: Box<dyn FnOnce(LoadResult<Arc<RuleSet>>) + Send + 'static>,
     ) {
         thread::spawn(move || {
             let loader = BundleLoader::new().expect("Failed to create loader");
@@ -124,20 +120,23 @@ impl BundleLoader {
 
             // Compile CEL expression
             let start_time = Instant::now();
-            let program = self.engine.compile(&rule.name, &rule.expr)
-                .map_err(|e| LoadError::CompilationError {
+            let program = self.engine.compile(&rule.name, &rule.expr).map_err(|e| {
+                LoadError::CompilationError {
                     rule: rule.name.clone(),
                     error: e.to_string(),
-                })?;
+                }
+            })?;
 
             let compile_time_us = start_time.elapsed().as_micros() as u64;
 
             // Estimate cost
-            let estimated_cost = self.engine.estimate_cost(&rule.expr)
-                .map_err(|e| LoadError::CompilationError {
-                    rule: rule.name.clone(),
-                    error: format!("Cost estimation failed: {}", e),
-                })?;
+            let estimated_cost =
+                self.engine
+                    .estimate_cost(&rule.expr)
+                    .map_err(|e| LoadError::CompilationError {
+                        rule: rule.name.clone(),
+                        error: format!("Cost estimation failed: {}", e),
+                    })?;
 
             let compiled_rule = CompiledRule {
                 rule: rule.clone(),
@@ -220,7 +219,11 @@ impl RuleSetSwapper {
     }
 
     /// Load and swap from content, keeping old rules on failure
-    pub fn load_blob_and_swap(&self, content: &str, format: BundleFormat) -> LoadResult<Arc<RuleSet>> {
+    pub fn load_blob_and_swap(
+        &self,
+        content: &str,
+        format: BundleFormat,
+    ) -> LoadResult<Arc<RuleSet>> {
         let loader = BundleLoader::new()?;
         let new_rules = loader.load_blob(content, format)?;
         Ok(self.swap(new_rules))
@@ -290,12 +293,14 @@ rules:
     #[test]
     fn test_load_file() -> Result<(), Box<dyn std::error::Error>> {
         let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(br#"
+        temp_file.write_all(
+            br#"
 version: 1
 rules:
   - name: file_rule
     expr: request.path.startsWith("/api")
-"#)?;
+"#,
+        )?;
 
         // Rename to .yaml extension for format detection
         let yaml_path = temp_file.path().with_extension("yaml");
@@ -333,7 +338,7 @@ rules:
                 program: ::cel::Program::compile("true").expect("Failed to compile test program"),
                 estimated_cost: 10,
                 compile_time_us: 100,
-            }
+            },
         );
 
         // Swap and verify

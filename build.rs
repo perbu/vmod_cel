@@ -8,6 +8,9 @@ fn main() {
     let major_version = version.split('.').next().unwrap();
 
     if env::var("CARGO_CFG_TARGET_OS").unwrap() == "linux" {
-        println!("cargo:rustc-link-arg=-Wl,-soname,libvmod_cel.so.{}", major_version);
+        println!(
+            "cargo:rustc-link-arg=-Wl,-soname,libvmod_cel.so.{}",
+            major_version
+        );
     }
 }

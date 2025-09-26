@@ -111,26 +111,22 @@ impl RuleBundle {
 
     /// Parse bundle from YAML string
     pub fn from_yaml(content: &str) -> Result<Self, String> {
-        serde_yaml::from_str(content)
-            .map_err(|e| format!("YAML parsing error: {}", e))
+        serde_yaml::from_str(content).map_err(|e| format!("YAML parsing error: {}", e))
     }
 
     /// Parse bundle from JSON string
     pub fn from_json(content: &str) -> Result<Self, String> {
-        serde_json::from_str(content)
-            .map_err(|e| format!("JSON parsing error: {}", e))
+        serde_json::from_str(content).map_err(|e| format!("JSON parsing error: {}", e))
     }
 
     /// Serialize bundle to YAML
     pub fn to_yaml(&self) -> Result<String, String> {
-        serde_yaml::to_string(self)
-            .map_err(|e| format!("YAML serialization error: {}", e))
+        serde_yaml::to_string(self).map_err(|e| format!("YAML serialization error: {}", e))
     }
 
     /// Serialize bundle to JSON
     pub fn to_json(&self) -> Result<String, String> {
-        serde_json::to_string_pretty(self)
-            .map_err(|e| format!("JSON serialization error: {}", e))
+        serde_json::to_string_pretty(self).map_err(|e| format!("JSON serialization error: {}", e))
     }
 }
 
@@ -161,7 +157,8 @@ impl RuleSet {
 
     /// Get enabled rule count
     pub fn enabled_rule_count(&self) -> usize {
-        self.programs.values()
+        self.programs
+            .values()
             .filter(|rule| rule.rule.enabled)
             .count()
     }
@@ -225,15 +222,13 @@ metadata:
     fn test_bundle_validation() {
         let mut bundle = RuleBundle {
             version: 1,
-            rules: vec![
-                Rule {
-                    name: "rule1".to_string(),
-                    expr: "true".to_string(),
-                    enabled: true,
-                    description: None,
-                    tags: vec![],
-                },
-            ],
+            rules: vec![Rule {
+                name: "rule1".to_string(),
+                expr: "true".to_string(),
+                enabled: true,
+                description: None,
+                tags: vec![],
+            }],
             metadata: None,
         };
 

@@ -32,12 +32,12 @@ pub struct SafetyLimits {
 impl Default for SafetyLimits {
     fn default() -> Self {
         Self {
-            max_expression_size: 16 * 1024,        // 16KB
-            max_ast_nodes: 1000,                   // Reasonable AST complexity
-            max_ast_depth: 32,                     // Prevent deep recursion
-            max_regex_size: 500,                   // Conservative regex size
-            max_string_literal_size: 1024,         // 1KB string literals
-            max_eval_steps: 10_000,                // Cost units budget
+            max_expression_size: 16 * 1024,            // 16KB
+            max_ast_nodes: 1000,                       // Reasonable AST complexity
+            max_ast_depth: 32,                         // Prevent deep recursion
+            max_regex_size: 500,                       // Conservative regex size
+            max_string_literal_size: 1024,             // 1KB string literals
+            max_eval_steps: 10_000,                    // Cost units budget
             max_eval_time: Duration::from_millis(100), // 100ms hard timeout
             max_eval_memory_bytes: 10 * 1024 * 1024,   // 10MB per evaluation
         }
@@ -48,26 +48,26 @@ impl SafetyLimits {
     /// Create production-ready safety limits (more restrictive)
     pub fn production() -> Self {
         Self {
-            max_expression_size: 8 * 1024,         // 8KB
-            max_ast_nodes: 500,                    // Stricter AST complexity
-            max_ast_depth: 24,                     // Stricter depth limit
-            max_regex_size: 256,                   // Smaller regex limit
-            max_string_literal_size: 512,          // Smaller string literals
-            max_eval_steps: 5_000,                 // Tighter cost budget
+            max_expression_size: 8 * 1024,            // 8KB
+            max_ast_nodes: 500,                       // Stricter AST complexity
+            max_ast_depth: 24,                        // Stricter depth limit
+            max_regex_size: 256,                      // Smaller regex limit
+            max_string_literal_size: 512,             // Smaller string literals
+            max_eval_steps: 5_000,                    // Tighter cost budget
             max_eval_time: Duration::from_millis(50), // 50ms timeout
-            max_eval_memory_bytes: 5 * 1024 * 1024,    // 5MB per evaluation
+            max_eval_memory_bytes: 5 * 1024 * 1024,   // 5MB per evaluation
         }
     }
 
     /// Create development-friendly limits (more permissive)
     pub fn development() -> Self {
         Self {
-            max_expression_size: 32 * 1024,        // 32KB
-            max_ast_nodes: 2000,                   // More permissive
-            max_ast_depth: 48,                     // Deeper nesting allowed
-            max_regex_size: 1024,                  // Larger regex patterns
-            max_string_literal_size: 2048,         // Larger string literals
-            max_eval_steps: 25_000,                // Higher cost budget
+            max_expression_size: 32 * 1024,            // 32KB
+            max_ast_nodes: 2000,                       // More permissive
+            max_ast_depth: 48,                         // Deeper nesting allowed
+            max_regex_size: 1024,                      // Larger regex patterns
+            max_string_literal_size: 2048,             // Larger string literals
+            max_eval_steps: 25_000,                    // Higher cost budget
             max_eval_time: Duration::from_millis(200), // 200ms timeout
             max_eval_memory_bytes: 20 * 1024 * 1024,   // 20MB per evaluation
         }
