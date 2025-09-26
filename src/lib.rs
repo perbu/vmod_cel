@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use varnish::vcl::Ctx;
 
 mod request_attrs;
 mod policy_engine;
@@ -689,7 +690,7 @@ mod cel {
     }
 
     /// Evaluate all enabled rules, returning true if ANY match (logical OR)
-    pub fn eval_any() -> bool {
+    pub fn eval_any(ctx: &mut Ctx) -> bool {
         let guard = match CEL_STATE.lock() {
             Ok(guard) => guard,
             Err(e) => {
@@ -712,14 +713,12 @@ mod cel {
             return false; // No enabled rules, nothing can match
         }
 
-        // TODO: Same VCL context access issue as eval()
-        // For now, return false as we can't evaluate without context
-        // In a future version, this would call cel_state.eval_any_rule(ctx)
-        false
+        // Now we can call the fully-implemented method with context!
+        cel_state.eval_any_rule(ctx).unwrap_or(false)
     }
 
     /// Evaluate all enabled rules, returning true if ALL match (logical AND)
-    pub fn eval_all() -> bool {
+    pub fn eval_all(ctx: &mut Ctx) -> bool {
         let guard = match CEL_STATE.lock() {
             Ok(guard) => guard,
             Err(e) => {
@@ -742,10 +741,8 @@ mod cel {
             return true; // No enabled rules, vacuous truth (all zero rules match)
         }
 
-        // TODO: Same VCL context access issue as eval()
-        // For now, return true (vacuous truth) as we can't evaluate without context
-        // In a future version, this would call cel_state.eval_all_rule(ctx)
-        true
+        // Now we can call the fully-implemented method with context!
+        cel_state.eval_all_rule(ctx).unwrap_or(true)
     }
 
     /// Generate explanation for rule evaluation (Phase 5)
