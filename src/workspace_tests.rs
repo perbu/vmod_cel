@@ -1,6 +1,6 @@
 #[cfg(test)]
-mod workspace_tests {
-    use super::workspace::WorkspaceConfig;
+mod tests {
+    use crate::WorkspaceConfig;
 
     #[test]
     fn test_workspace_config_default() {
@@ -28,6 +28,6 @@ mod workspace_tests {
     fn test_workspace_module_compiles() {
         // This test ensures the workspace module compiles correctly
         // The actual functionality would need integration tests with Varnish
-        assert!(true);
+        // Test passes if compilation succeeds
     }
 }

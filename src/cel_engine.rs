@@ -1,5 +1,5 @@
 use crate::policy_engine::PolicyEngine;
-use crate::request_attrs::{RequestAttrs, WsRequestAttrs};
+use crate::request_attrs::WsRequestAttrs;
 use crate::safety_limits::{CostTracker, SafetyError, SafetyLimits};
 use anyhow::Result;
 use cel::{Context, Program};
@@ -105,51 +105,6 @@ impl CelRustEngine {
         Ok(eval_context)
     }
 
-    /// Create a CEL evaluation context from request attributes
-    /// TODO: Context::default() allocates memory during request processing - should reuse or use workspace
-    fn create_eval_context(&self, attrs: &RequestAttrs) -> Result<Context, CelError> {
-        let mut eval_context = Context::default(); // TODO: Heap allocation
-
-        // Add request attributes as variables
-        // TODO: add_variable() may allocate memory for variable storage
-        eval_context
-            .add_variable("method", attrs.method.as_str())
-            .map_err(|e| CelError::EvaluationFailed {
-                message: format!("Failed to add method variable: {}", e), // TODO: String allocation in error
-            })?;
-
-        eval_context
-            .add_variable("path", attrs.path.as_str())
-            .map_err(|e| CelError::EvaluationFailed {
-                message: format!("Failed to add path variable: {}", e),
-            })?;
-
-        if let Some(ref query) = attrs.query {
-            eval_context
-                .add_variable("query", query.as_str())
-                .map_err(|e| CelError::EvaluationFailed {
-                    message: format!("Failed to add query variable: {}", e),
-                })?;
-        }
-
-        if let Some(ref client_ip) = attrs.client_ip {
-            eval_context
-                .add_variable("client_ip", client_ip.as_str())
-                .map_err(|e| CelError::EvaluationFailed {
-                    message: format!("Failed to add client_ip variable: {}", e),
-                })?;
-        }
-
-        if let Some(ref user_agent) = attrs.user_agent {
-            eval_context
-                .add_variable("user_agent", user_agent.as_str())
-                .map_err(|e| CelError::EvaluationFailed {
-                    message: format!("Failed to add user_agent variable: {}", e),
-                })?;
-        }
-
-        Ok(eval_context)
-    }
 
     /// Safely execute a function with panic recovery
     fn safe_execute<F, R>(&self, operation_name: &str, f: F) -> Result<R, CelError>
@@ -227,36 +182,8 @@ impl PolicyEngine for CelRustEngine {
         })
     }
 
-    fn eval(&self, program: &Self::Program, attrs: &RequestAttrs) -> Result<bool, Self::Error> {
-        let _start_time = Instant::now();
-        let mut _cost_tracker =
-            CostTracker::new(self.limits.max_eval_steps, self.limits.max_eval_time);
-
-        // Safely evaluate the expression
-        self.safe_execute("eval", || {
-            // Create evaluation context with request data
-            let context = self.create_eval_context(attrs)?;
-
-            // Execute the program
-            let result = program
-                .execute(&context)
-                .map_err(|e| CelError::EvaluationFailed {
-                    message: format!("CEL evaluation error: {}", e),
-                })?;
-
-            // Convert result to boolean
-            let boolean_result = match result {
-                cel::Value::Bool(b) => b,
-                cel::Value::Int(i) => i != 0,
-                cel::Value::UInt(u) => u != 0,
-                cel::Value::String(_) => true, // Non-empty string is truthy
-                cel::Value::List(_) => true,   // Non-empty list is truthy
-                cel::Value::Map(_) => true,    // Non-empty map is truthy
-                _ => false,
-            };
-
-            Ok(boolean_result)
-        })
+    fn eval_ws(&self, program: &Self::Program, attrs: &WsRequestAttrs) -> Result<bool, Self::Error> {
+        self.eval_ws(program, attrs)
     }
 
     fn validate_expr(&self, expr: &str) -> Result<(), Self::Error> {
@@ -318,24 +245,6 @@ impl Default for CelRustEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::request_attrs::RequestAttrs;
-    use std::collections::HashMap;
-
-    fn create_test_attrs() -> RequestAttrs {
-        let mut attrs = RequestAttrs::empty();
-        attrs.method = "GET".to_string();
-        attrs.path = "/api/v1/users".to_string();
-        attrs.query = Some("page=1&limit=10".to_string());
-        attrs.client_ip = Some("192.168.1.100".to_string());
-        attrs.user_agent = Some("Mozilla/5.0 (compatible; TestBot/1.0)".to_string());
-
-        let mut headers = HashMap::new();
-        headers.insert("content-type".to_string(), "application/json".to_string());
-        headers.insert("authorization".to_string(), "Bearer token123".to_string());
-        attrs.headers = headers;
-
-        attrs
-    }
 
     #[test]
     fn test_engine_creation() {
@@ -344,35 +253,6 @@ mod tests {
 
         let engine = engine.unwrap();
         assert_eq!(engine.engine_name(), "CelRustEngine");
-    }
-
-    #[test]
-    fn test_simple_expressions() {
-        let engine = CelRustEngine::new().unwrap();
-        let attrs = create_test_attrs();
-
-        // Simple boolean expression
-        let program = engine.compile("simple", "true").unwrap();
-        let result = engine.eval(&program, &attrs).unwrap();
-        assert!(result);
-
-        // Method check
-        let program = engine.compile("method_check", "method == 'GET'").unwrap();
-        let result = engine.eval(&program, &attrs).unwrap();
-        assert!(result);
-    }
-
-    #[test]
-    fn test_path_expressions() {
-        let engine = CelRustEngine::new().unwrap();
-        let attrs = create_test_attrs();
-
-        // Path starts with check
-        let program = engine
-            .compile("path_check", "path.startsWith('/api')")
-            .unwrap();
-        let result = engine.eval(&program, &attrs).unwrap();
-        assert!(result);
     }
 
     #[test]
@@ -410,4 +290,7 @@ mod tests {
 
         assert!(complex_cost > simple_cost);
     }
+
+    // Note: Integration tests for eval_ws require a Varnish context
+    // and are better handled in the VTC (Varnish Test Case) tests
 }

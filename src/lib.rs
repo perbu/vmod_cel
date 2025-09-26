@@ -22,7 +22,7 @@ pub use panic_safety::{
     CircuitBreaker, CircuitState, ErrorRecovery, PanicSafeWrapper, RecoveryStrategy,
 };
 pub use policy_engine::{CompiledProgram, EvalResult, PolicyEngine};
-pub use request_attrs::{AttributeBuilder, AttributeConfig, RequestAttrs, WsRequestAttrs};
+pub use request_attrs::{AttributeBuilder, AttributeConfig, WsRequestAttrs};
 pub use safety_limits::{CostTracker, SafetyLimits};
 pub use workspace::{WorkspaceConfig, WsHashMap, WsString};
 
@@ -239,137 +239,8 @@ impl CelState {
         }
     }
 
-    /// Evaluate a rule by name with full safety protection
-    pub fn eval_rule(&self, rule_name: &str, ctx: &varnish::vcl::Ctx) -> Result<bool, String> {
-        // Check circuit breaker first
-        if let Err(e) = self.circuit_breaker.allow_request() {
-            self.metrics.eval_err.fetch_add(1, Ordering::Relaxed);
-            return self.error_recovery.recover_from_error(&e);
-        }
 
-        // Execute with panic protection
-        let evaluation_result = self.panic_wrapper.execute_safe(|| {
-            // Get the compiled rule
-            let compiled_rule = self
-                .rules
-                .get_rule(rule_name)
-                .ok_or_else(|| format!("Rule '{}' not found", rule_name))?;
 
-            // Extract request attributes
-            // TODO: AttributeBuilder::new() and extract() allocate memory - should use workspace
-            let attr_builder = AttributeBuilder::new(self.config.attribute_config.clone());
-            let attrs = attr_builder
-                .extract(ctx)
-                .map_err(|e| format!("Failed to extract request attributes: {}", e))?;
-
-            // Evaluate the compiled CEL program
-            self.engine
-                .eval(&compiled_rule.program, &attrs)
-                .map_err(|e| format!("CEL evaluation failed: {}", e))
-        });
-
-        match evaluation_result {
-            Ok(result) => {
-                // Success case
-                self.circuit_breaker.record_success();
-                if result {
-                    self.metrics.eval_true.fetch_add(1, Ordering::Relaxed);
-                } else {
-                    self.metrics.eval_false.fetch_add(1, Ordering::Relaxed);
-                }
-                Ok(result)
-            }
-            Err(e) => {
-                // Panic occurred and was caught, or evaluation error
-                self.circuit_breaker.record_failure();
-                self.metrics.eval_err.fetch_add(1, Ordering::Relaxed);
-                eprintln!("CEL: Rule evaluation failed for '{}': {}", rule_name, e);
-                self.error_recovery.recover_from_error(&e)
-            }
-        }
-    }
-
-    /// Evaluate a rule with fallback default
-    pub fn eval_rule_or(&self, rule_name: &str, default: bool, ctx: &varnish::vcl::Ctx) -> bool {
-        match self.eval_rule(rule_name, ctx) {
-            Ok(result) => result,
-            Err(_) => {
-                // Rule not found or evaluation error - return default
-                default
-            }
-        }
-    }
-
-    /// Evaluate all enabled rules, returning true if ANY match (logical OR)
-    pub fn eval_any_rule(&self, ctx: &varnish::vcl::Ctx) -> Result<bool, String> {
-        // Check circuit breaker first
-        if let Err(e) = self.circuit_breaker.allow_request() {
-            self.metrics.eval_err.fetch_add(1, Ordering::Relaxed);
-            return self.error_recovery.recover_from_error(&e);
-        }
-
-        // Execute with panic protection
-        let evaluation_result = self.panic_wrapper.execute_safe(|| {
-            // Extract request attributes once for all rules
-            // TODO: AttributeBuilder and extract() allocate memory during request processing
-            let attr_builder = AttributeBuilder::new(self.config.attribute_config.clone());
-            let attrs = attr_builder
-                .extract(ctx)
-                .map_err(|e| format!("Failed to extract request attributes: {}", e))?;
-
-            // Get all enabled rules
-            // TODO: Vec allocation during request processing - should pre-filter or use iterator
-            let enabled_rules: Vec<_> = self
-                .rules
-                .programs
-                .iter()
-                .filter(|(_, rule)| rule.rule.enabled)
-                .collect();
-
-            // If no enabled rules, return false (nothing matches)
-            if enabled_rules.is_empty() {
-                return Ok(false);
-            }
-
-            // Evaluate each enabled rule until one matches
-            for (rule_name, compiled_rule) in enabled_rules {
-                match self.engine.eval(&compiled_rule.program, &attrs) {
-                    Ok(result) => {
-                        if result {
-                            self.metrics.eval_true.fetch_add(1, Ordering::Relaxed);
-                        } else {
-                            self.metrics.eval_false.fetch_add(1, Ordering::Relaxed);
-                        }
-
-                        // Short-circuit on first match
-                        if result {
-                            return Ok(true);
-                        }
-                    }
-                    Err(e) => {
-                        self.metrics.eval_err.fetch_add(1, Ordering::Relaxed);
-                        eprintln!("CEL: Error evaluating rule '{}': {}", rule_name, e);
-                        // Continue evaluating other rules on error
-                    }
-                }
-            }
-
-            // No rules matched
-            Ok(false)
-        });
-
-        // Handle the result
-        match evaluation_result {
-            Ok(result) => {
-                self.circuit_breaker.record_success();
-                Ok(result)
-            }
-            Err(e) => {
-                self.circuit_breaker.record_failure();
-                self.error_recovery.recover_from_error(&e)
-            }
-        }
-    }
 
     /// Evaluate all enabled rules, returning true if ANY match (logical OR) using workspace
     pub fn eval_any_rule_ws(&self, ctx: &mut varnish::vcl::Ctx) -> Result<bool, String> {
@@ -398,10 +269,8 @@ impl CelState {
                 .iter()
                 .filter(|(_, rule)| rule.rule.enabled);
 
-            // If no enabled rules, return false (nothing matches)
-            let mut has_rules = false;
+            // Evaluate each enabled rule until one matches
             for (rule_name, compiled_rule) in enabled_rules {
-                has_rules = true;
                 match self.engine.eval_ws(&compiled_rule.program, &attrs) {
                     Ok(result) => {
                         if result {
@@ -423,8 +292,8 @@ impl CelState {
                 }
             }
 
-            // No rules found or no rules matched
-            Ok(has_rules && false) // Only return false if we had rules but none matched
+            // No rules matched
+            Ok(false)
         });
 
         // Handle the result
@@ -508,119 +377,7 @@ impl CelState {
         }
     }
 
-    /// Evaluate all enabled rules, returning true if ALL match (logical AND)
-    pub fn eval_all_rule(&self, ctx: &varnish::vcl::Ctx) -> Result<bool, String> {
-        // Check circuit breaker first
-        if let Err(e) = self.circuit_breaker.allow_request() {
-            self.metrics.eval_err.fetch_add(1, Ordering::Relaxed);
-            return self.error_recovery.recover_from_error(&e);
-        }
 
-        // Execute with panic protection
-        let evaluation_result = self.panic_wrapper.execute_safe(|| {
-            // Extract request attributes once for all rules
-            // TODO: AttributeBuilder and extract() allocate memory during request processing
-            let attr_builder = AttributeBuilder::new(self.config.attribute_config.clone());
-            let attrs = attr_builder
-                .extract(ctx)
-                .map_err(|e| format!("Failed to extract request attributes: {}", e))?;
-
-            // Get all enabled rules
-            // TODO: Vec allocation during request processing - should pre-filter or use iterator
-            let enabled_rules: Vec<_> = self
-                .rules
-                .programs
-                .iter()
-                .filter(|(_, rule)| rule.rule.enabled)
-                .collect();
-
-            // If no enabled rules, return true (vacuous truth - all zero rules match)
-            if enabled_rules.is_empty() {
-                return Ok(true);
-            }
-
-            // Evaluate each enabled rule until one doesn't match
-            for (rule_name, compiled_rule) in enabled_rules {
-                match self.engine.eval(&compiled_rule.program, &attrs) {
-                    Ok(result) => {
-                        if result {
-                            self.metrics.eval_true.fetch_add(1, Ordering::Relaxed);
-                        } else {
-                            self.metrics.eval_false.fetch_add(1, Ordering::Relaxed);
-                        }
-
-                        // Short-circuit on first non-match
-                        if !result {
-                            return Ok(false);
-                        }
-                    }
-                    Err(e) => {
-                        self.metrics.eval_err.fetch_add(1, Ordering::Relaxed);
-                        eprintln!("CEL: Error evaluating rule '{}': {}", rule_name, e);
-                        // Evaluation error counts as non-match
-                        return Ok(false);
-                    }
-                }
-            }
-
-            // All rules matched
-            Ok(true)
-        });
-
-        // Handle the result
-        match evaluation_result {
-            Ok(result) => {
-                self.circuit_breaker.record_success();
-                Ok(result)
-            }
-            Err(e) => {
-                self.circuit_breaker.record_failure();
-                self.error_recovery.recover_from_error(&e)
-            }
-        }
-    }
-
-    /// Generate explanation for a rule evaluation
-    pub fn explain_rule(&self, rule_name: &str, ctx: &varnish::vcl::Ctx) -> String {
-        if !self.config.enable_explain {
-            return String::new();
-        }
-
-        // Get the compiled rule
-        let compiled_rule = match self.rules.get_rule(rule_name) {
-            Some(rule) => rule,
-            None => return format!("Rule '{}' not found", rule_name),
-        };
-
-        // Extract request attributes
-        let attr_builder = AttributeBuilder::new(self.config.attribute_config.clone());
-        let attrs = match attr_builder.extract(ctx) {
-            Ok(attrs) => attrs,
-            Err(e) => return format!("Failed to extract request attributes: {}", e),
-        };
-
-        // TODO: Phase 5 - Add actual explanation generation
-        // For now, return basic information
-        match self.engine.eval(&compiled_rule.program, &attrs) {
-            Ok(result) => {
-                format!(
-                    "Rule '{}': {} | Expression: '{}' | Result: {} | Cost: {}",
-                    rule_name,
-                    compiled_rule
-                        .rule
-                        .description
-                        .as_deref()
-                        .unwrap_or("No description"),
-                    compiled_rule.rule.expr,
-                    result,
-                    compiled_rule.estimated_cost
-                )
-            }
-            Err(e) => {
-                format!("Rule '{}': Evaluation error: {}", rule_name, e)
-            }
-        }
-    }
 
     /// Set explain mode
     pub fn set_explain_mode(&mut self, enabled: bool) {

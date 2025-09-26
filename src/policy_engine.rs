@@ -1,4 +1,4 @@
-use crate::request_attrs::RequestAttrs;
+use crate::request_attrs::WsRequestAttrs;
 use std::fmt::Debug;
 
 /// PolicyEngine trait defines the interface for rule evaluation engines
@@ -24,17 +24,17 @@ pub trait PolicyEngine: Send + Sync + 'static {
     /// * `Err(Error)` - Compilation error with details
     fn compile(&self, name: &str, expr: &str) -> Result<Self::Program, Self::Error>;
 
-    /// Evaluate a compiled program against request attributes
+    /// Evaluate a compiled program against workspace request attributes
     ///
     /// # Arguments
     /// * `program` - Compiled program from compile()
-    /// * `attrs` - Request attributes to evaluate against
+    /// * `attrs` - Workspace-backed request attributes to evaluate against
     ///
     /// # Returns
     /// * `Ok(true)` - Rule matched/condition is true
     /// * `Ok(false)` - Rule did not match/condition is false
     /// * `Err(Error)` - Evaluation error (treated as false in production)
-    fn eval(&self, program: &Self::Program, attrs: &RequestAttrs) -> Result<bool, Self::Error>;
+    fn eval_ws(&self, program: &Self::Program, attrs: &WsRequestAttrs) -> Result<bool, Self::Error>;
 
     /// Validate a rule expression without compiling it
     ///

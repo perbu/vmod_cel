@@ -17,7 +17,10 @@ pub struct WsString<'ctx> {
 
 impl<'ctx> WsString<'ctx> {
     /// Create a WsString from a raw pointer and length
-    /// SAFETY: ptr must point to valid UTF-8 data of the given length
+    ///
+    /// # Safety
+    /// ptr must point to valid UTF-8 data of the given length that remains
+    /// valid for the lifetime 'ctx
     pub unsafe fn from_raw(ptr: *const u8, len: usize) -> Self {
         Self {
             ptr,
@@ -102,19 +105,19 @@ impl<'ctx> WsString<'ctx> {
     }
 }
 
-impl<'ctx> AsRef<str> for WsString<'ctx> {
+impl AsRef<str> for WsString<'_> {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
 }
 
-impl<'ctx> PartialEq<str> for WsString<'ctx> {
+impl PartialEq<str> for WsString<'_> {
     fn eq(&self, other: &str) -> bool {
         self.as_str() == other
     }
 }
 
-impl<'ctx> PartialEq<&str> for WsString<'ctx> {
+impl PartialEq<&str> for WsString<'_> {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
     }
@@ -238,22 +241,6 @@ impl Default for WorkspaceConfig {
     }
 }
 
-/// Check if workspace has enough space for an allocation
-pub fn check_workspace_space(ws: &mut Workspace, size: usize) -> bool {
-    // This is a heuristic - Varnish workspace doesn't expose remaining space directly
-    // We make a test allocation and immediately return it
-    match NonZeroUsize::new(size) {
-        Some(nz_size) => {
-            // Try to allocate - this is the only way to check available space
-            // Note: This is not ideal but necessary given the Varnish API
-            match ws.allocate(nz_size) {
-                Ok(_) => true,  // Space available (but we consumed it)
-                Err(_) => false, // Out of space
-            }
-        }
-        None => true, // Zero size always succeeds
-    }
-}
 
 #[cfg(test)]
 mod tests {
