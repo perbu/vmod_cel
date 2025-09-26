@@ -1,6 +1,6 @@
 vcl 4.1;
 
-# Example VCL configuration demonstrating vmod_cel usage
+# Example VCL configuration demonstrating simplified vmod_cel usage
 # This example shows how to integrate CEL rules with Varnish Cache
 # for advanced request filtering and security policies
 
@@ -16,36 +16,24 @@ backend default {
     .between_bytes_timeout = 10s;
 }
 
-# Backend for blocked requests (optional - can use synth instead)
-backend blackhole {
-    .host = "127.0.0.1";
-    .port = "9999";  # Non-existent port
-    .connect_timeout = 1s;
-    .first_byte_timeout = 1s;
-}
-
 # Initialize CEL module and load rules
 sub vcl_init {
     # Initialize the CEL module
     if (!cel.init()) {
+        std.log("Failed to initialize CEL module");
         return;
     }
 
-    # Load rule sets - choose one or combine multiple
+    # Load rule sets - combine multiple rule files
     # Start with basic rules for initial deployment
     if (!cel.load_file("/etc/varnish/rules/basic_rules.yaml")) {
         std.log("Failed to load basic rules");
     }
 
     # Add medium complexity rules for API protection
-    # if (!cel.load_file("/etc/varnish/rules/medium_rules.yaml")) {
-    #     std.log("Failed to load medium rules");
-    # }
-
-    # Add complex rules for enterprise security (careful - may cause false positives)
-    # if (!cel.load_file("/etc/varnish/rules/complex_rules.yaml")) {
-    #     std.log("Failed to load complex rules");
-    # }
+    if (!cel.load_file("/etc/varnish/rules/medium_rules.yaml")) {
+        std.log("Failed to load medium rules");
+    }
 
     # Configure attribute extraction
     if (!cel.configure_attributes(
@@ -54,16 +42,6 @@ sub vcl_init {
         8192     # max_header_size
     )) {
         std.log("Failed to configure CEL attributes");
-    }
-
-    # Enable explanation mode for debugging (disable in production)
-    if (!cel.set_explain_mode(true)) {
-        std.log("Failed to enable CEL explain mode");
-    }
-
-    # Add some dynamic rules for testing
-    if (!cel.add_rule("block_curl", 'request.user_agent.contains("curl")')) {
-        std.log("Failed to add curl blocking rule");
     }
 
     std.log("CEL module initialized successfully");
@@ -78,117 +56,27 @@ sub vcl_recv {
         set req.http.X-Real-IP = client.ip;
     }
 
-    # Basic security rules - block immediately on match
-    if (cel.eval("block_bots")) {
-        std.log("CEL: Blocked bot - " + cel.explain("block_bots"));
-        return (synth(403, "Bot traffic not allowed"));
-    }
-
-    # Method validation - only allow specific methods
-    if (!cel.eval_or("allowed_methods", true)) {
-        std.log("CEL: Blocked method " + req.method + " - " + cel.explain("allowed_methods"));
-        return (synth(405, "Method not allowed"));
-    }
-
-    # Require User-Agent header
-    if (!cel.eval("require_user_agent")) {
-        std.log("CEL: Missing User-Agent - " + cel.explain("require_user_agent"));
-        return (synth(400, "User-Agent header required"));
-    }
-
-    # Always allow health checks (bypass other rules)
-    if (cel.eval("allow_health_check")) {
-        std.log("CEL: Health check allowed");
-        # Skip cache for health checks
+    # Basic health check bypass - allow before security rules
+    if (req.url == "/health" || req.url == "/ping") {
+        std.log("Health check allowed, bypassing CEL rules");
         return (pass);
     }
 
-    # Protect admin areas
-    if (cel.eval("protect_admin")) {
-        std.log("CEL: Admin area blocked for " + req.http.X-Real-IP + " - " + cel.explain("protect_admin"));
-        return (synth(403, "Access denied"));
-    }
-
-    # API-specific rules (if medium rules are loaded)
-    # API authentication check
-    if (cel.eval_or("api_auth_required", false)) {
-        std.log("CEL: API authentication required - " + cel.explain("api_auth_required"));
-        return (synth(401, "Authentication required"));
-    }
-
-    # Suspicious activity detection
-    if (cel.eval_or("suspicious_activity", false)) {
-        std.log("CEL: Suspicious activity detected - " + cel.explain("suspicious_activity"));
-        # Log to security system
-        std.syslog(LOG_WARNING, "Suspicious activity from " + req.http.X-Real-IP +
+    # Evaluate all security rules - block if ANY rule matches (logical OR)
+    # This includes bot blocking, method validation, admin protection, etc.
+    if (cel.eval_any(ctx)) {
+        std.log("CEL: Request blocked by security rules from " + req.http.X-Real-IP);
+        std.syslog(LOG_WARNING, "CEL blocked request from " + req.http.X-Real-IP +
                    ": " + req.method + " " + req.url);
-        return (synth(429, "Rate limited"));
+        return (synth(403, "Request blocked by security policy"));
     }
 
-    # Content type validation for API endpoints
-    if (cel.eval_or("api_content_type_validation", false)) {
-        std.log("CEL: Invalid content type - " + cel.explain("api_content_type_validation"));
-        return (synth(415, "Unsupported Media Type"));
-    }
-
-    # File upload security
-    if (cel.eval_or("file_upload_validation", false)) {
-        std.log("CEL: Dangerous file upload blocked - " + cel.explain("file_upload_validation"));
-        return (synth(400, "File type not allowed"));
-    }
-
-    # Block deprecated API versions
-    if (cel.eval_or("deprecated_api_version", false)) {
-        std.log("CEL: Deprecated API version - " + cel.explain("deprecated_api_version"));
-        return (synth(410, "API version deprecated"));
-    }
-
-    # XSS detection in query parameters
-    if (cel.eval_or("xss_in_query_params", false)) {
-        std.log("CEL: XSS attempt blocked - " + cel.explain("xss_in_query_params"));
-        std.syslog(LOG_ALERT, "XSS attempt from " + req.http.X-Real-IP +
-                   ": " + req.url);
-        return (synth(400, "Malicious request blocked"));
-    }
-
-    # SQL injection detection
-    if (cel.eval_or("sql_injection_attempt", false)) {
-        std.log("CEL: SQL injection attempt blocked - " + cel.explain("sql_injection_attempt"));
-        std.syslog(LOG_ALERT, "SQL injection attempt from " + req.http.X-Real-IP +
-                   ": " + req.url);
-        return (synth(400, "Malicious request blocked"));
-    }
-
-    # Complex rules (enterprise-grade - enable carefully)
-    # Advanced threat detection
-    if (cel.eval_or("advanced_threat_detection", false)) {
-        std.log("CEL: Advanced threat detected - " + cel.explain("advanced_threat_detection"));
-        std.syslog(LOG_CRIT, "Advanced threat from " + req.http.X-Real-IP +
-                   ": " + req.method + " " + req.url);
-        # Could redirect to CAPTCHA or rate limiting service
-        return (synth(403, "Advanced security check required"));
-    }
-
-    # API abuse detection
-    if (cel.eval_or("api_abuse_behavioral_analysis", false)) {
-        std.log("CEL: API abuse detected - " + cel.explain("api_abuse_behavioral_analysis"));
-        return (synth(429, "API usage limit exceeded"));
-    }
-
-    # Geographic anomaly detection
-    if (cel.eval_or("geo_temporal_anomaly", false)) {
-        std.log("CEL: Geographic anomaly - " + cel.explain("geo_temporal_anomaly"));
-        # Could trigger 2FA requirement
-        return (synth(403, "Geographic verification required"));
-    }
-
-    # Business logic abuse
-    if (cel.eval_or("business_logic_abuse", false)) {
-        std.log("CEL: Business logic abuse - " + cel.explain("business_logic_abuse"));
-        std.syslog(LOG_ALERT, "Business logic abuse from " + req.http.X-Real-IP +
-                   ": " + req.url);
-        return (synth(400, "Invalid request"));
-    }
+    # Alternative approach: Use eval_all() for rules that ALL must pass
+    # This would be useful for validation rules where everything must be valid
+    # if (!cel.eval_all(ctx)) {
+    #     std.log("CEL: Request failed validation rules from " + req.http.X-Real-IP);
+    #     return (synth(400, "Request failed validation"));
+    # }
 
     # Add custom headers for downstream applications
     set req.http.X-CEL-Processed = "true";
@@ -210,7 +98,6 @@ sub vcl_recv {
 
 # Handle cache hits
 sub vcl_hit {
-    # Log cache hit with CEL info
     std.log("Cache HIT: " + req.url + " (CEL processed)");
     return (deliver);
 }
@@ -245,13 +132,11 @@ sub vcl_backend_response {
 
 # Client response processing
 sub vcl_deliver {
-    # Add performance and security headers
-    set resp.http.X-CEL-Rules = cel.list_rules();
+    # Add monitoring headers (remove in production for security)
     set resp.http.X-CEL-Metrics = cel.metrics_summary();
     set resp.http.X-CEL-Safety = cel.safety_status();
 
-    # Remove sensitive headers in production
-    # unset resp.http.X-CEL-Rules;
+    # For production, remove debug headers:
     # unset resp.http.X-CEL-Metrics;
     # unset resp.http.X-CEL-Safety;
 
@@ -299,24 +184,24 @@ sub vcl_synth {
         return (deliver);
     }
 
-    if (resp.status == 429) {
+    if (resp.status == 400) {
         set resp.http.Content-Type = "text/html; charset=utf-8";
-        set resp.http.Retry-After = "300";
+        set resp.http.Retry-After = "60";
 
         synthetic({"
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Rate Limited</title>
+    <title>Bad Request</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; }
-        .error { color: #f57c00; }
+        .error { color: #d32f2f; }
     </style>
 </head>
 <body>
-    <h1 class="error">Rate Limited</h1>
-    <p>You are making requests too quickly. Please slow down.</p>
-    <p>Try again in 5 minutes.</p>
+    <h1 class="error">Bad Request</h1>
+    <p>Your request could not be processed due to validation errors.</p>
+    <p>Please check your request and try again.</p>
 </body>
 </html>
         "});

@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+    - name: Get version from tag
+      id: get_version
+      run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ steps.get_version.outputs.version }}
+        draft: false
+        prerelease: ${{ contains(steps.get_version.outputs.version, '-') }}
+
+  build-release:
+    name: Build Release (${{ matrix.os }}, Varnish ${{ matrix.varnish }})
+    runs-on: ubuntu-latest
+    needs: create-release
+    strategy:
+      matrix:
+        os: ['ubuntu-22.04', 'ubuntu-20.04']
+        varnish: ['7.4', '7.3', '7.2']
+        include:
+          - os: 'almalinux:9'
+            varnish: '7.4'
+            container: true
+          - os: 'almalinux:8'
+            varnish: '7.3'
+            container: true
+          - os: 'debian:bookworm'
+            varnish: '7.4'
+            container: true
+          - os: 'debian:bullseye'
+            varnish: '7.3'
+            container: true
+
+    container: ${{ matrix.container && matrix.os || null }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install system dependencies (Ubuntu)
+      if: startsWith(matrix.os, 'ubuntu')
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential pkg-config
+        curl -s https://packagecloud.io/install/repositories/varnishcache/varnish${{ matrix.varnish }}/script.deb.sh | sudo bash
+        sudo apt-get install -y varnish-dev
+
+    - name: Install system dependencies (AlmaLinux)
+      if: startsWith(matrix.os, 'almalinux')
+      run: |
+        dnf update -y
+        dnf install -y gcc gcc-c++ make pkgconfig curl
+        curl -s https://packagecloud.io/install/repositories/varnishcache/varnish${{ matrix.varnish }}/script.rpm.sh | bash
+        dnf install -y varnish-devel
+
+    - name: Install system dependencies (Debian)
+      if: startsWith(matrix.os, 'debian')
+      run: |
+        apt-get update
+        apt-get install -y build-essential pkg-config curl
+        curl -s https://packagecloud.io/install/repositories/varnishcache/varnish${{ matrix.varnish }}/script.deb.sh | bash
+        apt-get update
+        apt-get install -y varnish-dev
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Build Release
+      run: cargo build --release --verbose
+
+    - name: Create versioned archive
+      run: |
+        VERSION="${{ needs.create-release.outputs.version }}"
+        ARCHIVE_NAME="libvmod_cel-${VERSION}-${{ matrix.os }}-varnish${{ matrix.varnish }}"
+        mkdir "${ARCHIVE_NAME}"
+        cp target/release/libvmod_cel.so "${ARCHIVE_NAME}/"
+        cp README.md VERSIONING.md "${ARCHIVE_NAME}/"
+        tar -czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./libvmod_cel-${{ needs.create-release.outputs.version }}-${{ matrix.os }}-varnish${{ matrix.varnish }}.tar.gz
+        asset_name: libvmod_cel-${{ needs.create-release.outputs.version }}-${{ matrix.os }}-varnish${{ matrix.varnish }}.tar.gz
+        asset_content_type: application/gzip

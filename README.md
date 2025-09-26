@@ -25,22 +25,6 @@ Initialize the VMOD (called manually from VCL)
 
 Load CEL rules from a file
 
-### Function `BOOL cel.eval(STRING rule_name)`
-
-Evaluate a named CEL rule against the current request
-
-### Function `VOID cel.add_rule(STRING name, STRING expression)`
-
-Add a new CEL rule (for testing and development)
-
-### Function `STRING cel.rule_info(STRING rule_name)`
-
-Get rule information for debugging
-
-### Function `STRING cel.debug_config()`
-
-Get configuration status (placeholder for Phase 2b)
-
 ### Function `VOID cel.configure_attributes(BOOL extract_cookies, INT max_headers, INT max_header_size)`
 
 Configure attribute extraction settings
@@ -48,14 +32,6 @@ Configure attribute extraction settings
 ### Function `STRING cel.metrics_summary()`
 
 Get metrics summary
-
-### Function `STRING cel.list_rules()`
-
-List all available rules
-
-### Function `BOOL cel.eval_or(STRING rule_name, BOOL default)`
-
-Evaluate a rule with fallback default (Phase 5)
 
 ### Function `BOOL cel.eval_any()`
 
@@ -65,18 +41,6 @@ Evaluate all enabled rules, returning true if ANY match (logical OR)
 
 Evaluate all enabled rules, returning true if ALL match (logical AND)
 
-### Function `STRING cel.explain(STRING rule_name)`
-
-Generate explanation for rule evaluation (Phase 5)
-
-### Function `VOID cel.set_explain_mode(BOOL enabled)`
-
-Enable/disable explanation mode (Phase 5)
-
 ### Function `STRING cel.safety_status()`
 
 Get safety and stability status (Phase 6)
-
-### Function `STRING cel.safety_metrics()`
-
-Get detailed safety metrics as JSON-like string (Phase 6)

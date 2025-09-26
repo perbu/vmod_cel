@@ -11,8 +11,6 @@ mod bundle;
 mod loader;
 mod panic_safety;
 
-#[cfg(test)]
-mod phase5_tests;
 
 pub use request_attrs::{RequestAttrs, AttributeBuilder, AttributeConfig};
 pub use policy_engine::{PolicyEngine, CompiledProgram, EvalResult};
@@ -507,92 +505,9 @@ mod cel {
         }
     }
 
-    /// Evaluate a named CEL rule against the current request
-    pub fn eval(rule_name: &str) -> bool {
-        let guard = match CEL_STATE.lock() {
-            Ok(guard) => guard,
-            Err(e) => {
-                eprintln!("CEL: Failed to acquire state lock in eval(): {}", e);
-                return false;
-            }
-        };
 
-        let cel_state = match guard.as_ref() {
-            Some(state) => state,
-            None => {
-                eprintln!("CEL: VMOD not initialized in eval()");
-                return false;
-            }
-        };
 
-        // Check if rule exists before evaluation
-        if cel_state.rules.get_rule(rule_name).is_none() {
-            eprintln!("CEL: Rule '{}' not found in eval()", rule_name);
-            cel_state.metrics.eval_err.fetch_add(1, Ordering::Relaxed);
-            return false;
-        }
 
-        // TODO: The current VMOD interface doesn't provide direct access to VCL context
-        // This needs to be resolved in future versions by either:
-        // 1. Adding context access to the varnish crate VMOD interface
-        // 2. Using thread-local storage to pass context
-        // 3. Restructuring the VMOD to use a different pattern
-
-        // For now, return false and increment error counter
-        eprintln!("CEL: eval() function needs VCL context access - not yet implemented");
-        cel_state.metrics.eval_err.fetch_add(1, Ordering::Relaxed);
-        false
-    }
-
-    /// Add a new CEL rule (for testing and development)
-    pub fn add_rule(name: &str, expression: &str) -> Result<(), String> {
-        let mut guard = CEL_STATE.lock().unwrap();
-        let cel_state = match guard.as_mut() {
-            Some(state) => state,
-            None => return Err("VMOD not initialized".to_string()),
-        };
-
-        cel_state.add_rule(name, expression)
-    }
-
-    /// Get rule information for debugging
-    pub fn rule_info(rule_name: &str) -> String {
-        let guard = CEL_STATE.lock().unwrap();
-        let cel_state = match guard.as_ref() {
-            Some(state) => state,
-            None => return "VMOD not initialized".to_string(),
-        };
-
-        match cel_state.rules.get_rule(rule_name) {
-            Some(compiled_rule) => {
-                format!(
-                    "Rule: {} | Expression: {} | Enabled: {} | Cost: {} | Compile time: {}µs",
-                    compiled_rule.rule.name,
-                    compiled_rule.rule.expr,
-                    compiled_rule.rule.enabled,
-                    compiled_rule.estimated_cost,
-                    compiled_rule.compile_time_us
-                )
-            }
-            None => format!("Rule '{}' not found", rule_name),
-        }
-    }
-
-    /// Get configuration status (placeholder for Phase 2b)
-    pub fn debug_config() -> String {
-        let guard = CEL_STATE.lock().unwrap();
-        match guard.as_ref() {
-            Some(cel_state) => {
-                format!(
-                    "Extract cookies: {}, Max headers: {}, Max header size: {}",
-                    cel_state.config.attribute_config.extract_cookies,
-                    cel_state.config.attribute_config.max_headers,
-                    cel_state.config.attribute_config.max_header_value_size
-                )
-            }
-            None => "VMOD not initialized".to_string(),
-        }
-    }
 
     /// Configure attribute extraction settings
     pub fn configure_attributes(
@@ -642,52 +557,7 @@ mod cel {
         }
     }
 
-    /// List all available rules
-    pub fn list_rules() -> String {
-        let guard = CEL_STATE.lock().unwrap();
-        match guard.as_ref() {
-            Some(cel_state) => {
-                let names = cel_state.rules.rule_names();
-                if names.is_empty() {
-                    "No rules loaded".to_string()
-                } else {
-                    let name_strings: Vec<String> = names.iter().map(|s| (*s).clone()).collect();
-                    format!("Rules ({}): {}", names.len(), name_strings.join(", "))
-                }
-            }
-            None => "VMOD not initialized".to_string(),
-        }
-    }
 
-    /// Evaluate a rule with fallback default (Phase 5)
-    pub fn eval_or(rule_name: &str, default: bool) -> bool {
-        let guard = match CEL_STATE.lock() {
-            Ok(guard) => guard,
-            Err(e) => {
-                eprintln!("CEL: Failed to acquire state lock in eval_or(): {}", e);
-                return default;
-            }
-        };
-
-        let cel_state = match guard.as_ref() {
-            Some(state) => state,
-            None => {
-                eprintln!("CEL: VMOD not initialized in eval_or()");
-                return default;
-            }
-        };
-
-        // Check if rule exists
-        if cel_state.rules.get_rule(rule_name).is_none() {
-            // Rule not found - return default (this is expected behavior for eval_or)
-            return default;
-        }
-
-        // TODO: Same VCL context access issue as eval()
-        // For now, return default but don't increment error counter
-        // since eval_or is designed to handle missing rules gracefully
-        default
-    }
 
     /// Evaluate all enabled rules, returning true if ANY match (logical OR)
     pub fn eval_any(ctx: &mut Ctx) -> bool {
@@ -745,69 +615,7 @@ mod cel {
         cel_state.eval_all_rule(ctx).unwrap_or(true)
     }
 
-    /// Generate explanation for rule evaluation (Phase 5)
-    pub fn explain(rule_name: &str) -> String {
-        let guard = match CEL_STATE.lock() {
-            Ok(guard) => guard,
-            Err(e) => {
-                eprintln!("CEL: Failed to acquire state lock in explain(): {}", e);
-                return String::new();
-            }
-        };
 
-        let cel_state = match guard.as_ref() {
-            Some(state) => state,
-            None => {
-                eprintln!("CEL: VMOD not initialized in explain()");
-                return String::new();
-            }
-        };
-
-        if !cel_state.config.enable_explain {
-            return String::new();
-        }
-
-        // TODO: Same VCL context access issue as eval()
-        // For now, return basic rule information without live evaluation
-        match cel_state.rules.get_rule(rule_name) {
-            Some(compiled_rule) => {
-                format!(
-                    "Rule '{}': {} | Expression: '{}' | Enabled: {} | Cost: {} | Compile time: {}µs",
-                    compiled_rule.rule.name,
-                    compiled_rule.rule.description.as_deref().unwrap_or("No description"),
-                    compiled_rule.rule.expr,
-                    compiled_rule.rule.enabled,
-                    compiled_rule.estimated_cost,
-                    compiled_rule.compile_time_us
-                )
-            }
-            None => String::new(), // Return empty string for missing rules when explain is enabled
-        }
-    }
-
-    /// Enable/disable explanation mode (Phase 5)
-    pub fn set_explain_mode(enabled: bool) -> Result<(), String> {
-        let mut guard = match CEL_STATE.lock() {
-            Ok(guard) => guard,
-            Err(e) => {
-                let err_msg = format!("Failed to acquire state lock in set_explain_mode(): {}", e);
-                eprintln!("CEL: {}", err_msg);
-                return Err(err_msg);
-            }
-        };
-
-        match guard.as_mut() {
-            Some(cel_state) => {
-                cel_state.set_explain_mode(enabled);
-                Ok(())
-            }
-            None => {
-                let err_msg = "VMOD not initialized".to_string();
-                eprintln!("CEL: {} in set_explain_mode()", err_msg);
-                Err(err_msg)
-            }
-        }
-    }
 
     /// Get safety and stability status (Phase 6)
     pub fn safety_status() -> String {
@@ -827,33 +635,6 @@ mod cel {
         }
     }
 
-    /// Get detailed safety metrics as JSON-like string (Phase 6)
-    pub fn safety_metrics() -> String {
-        let guard = match CEL_STATE.lock() {
-            Ok(guard) => guard,
-            Err(e) => {
-                return format!("{{\"error\": \"Failed to acquire state lock: {}\"}}", e);
-            }
-        };
-
-        match guard.as_ref() {
-            Some(cel_state) => {
-                let status = cel_state.get_safety_status();
-                format!(
-                    "{{\"healthy\": {}, \"panic_count\": {}, \"recovery_count\": {}, \"error_count\": {}, \"error_recovery_count\": {}, \"circuit_breaker_state\": \"{}\", \"circuit_failure_count\": {}, \"total_evaluations\": {}}}",
-                    status.is_healthy(),
-                    status.panic_count,
-                    status.recovery_count,
-                    status.error_count,
-                    status.error_recovery_count,
-                    status.circuit_breaker_state,
-                    status.circuit_failure_count,
-                    status.total_evaluations
-                )
-            }
-            None => "{\"error\": \"VMOD not initialized\"}".to_string(),
-        }
-    }
 }
 
 // VTC tests will be added back in Phase 2c
