@@ -7,7 +7,7 @@ use std::io::Write;
 
 #[test]
 fn test_load_example_bundle() {
-    let loader = BundleLoader::new();
+    let loader = BundleLoader::new().expect("Failed to create loader");
     let result = loader.load_file("tests/bundle_example.yaml");
 
     assert!(result.is_ok(), "Failed to load example bundle: {:?}", result.err());
@@ -22,7 +22,7 @@ fn test_load_example_bundle() {
 
 #[test]
 fn test_load_malformed_bundle() {
-    let loader = BundleLoader::new();
+    let loader = BundleLoader::new().expect("Failed to create loader");
     let result = loader.load_file("tests/bundle_malformed.yaml");
 
     assert!(result.is_err(), "Should fail to load malformed bundle");
@@ -97,7 +97,7 @@ fn test_concurrent_access() {
 
 #[test]
 fn test_background_loading() {
-    let loader = BundleLoader::new();
+    let loader = BundleLoader::new().expect("Failed to create loader");
     let result = Arc::new(Mutex::new(None));
     let result_clone = result.clone();
 
@@ -149,7 +149,7 @@ fn test_json_format_support() -> Result<(), Box<dyn std::error::Error>> {
     let json_path = temp_file.path().with_extension("json");
     std::fs::copy(temp_file.path(), &json_path)?;
 
-    let loader = BundleLoader::new();
+    let loader = BundleLoader::new().expect("Failed to create loader");
     let result = loader.load_file(&json_path);
 
     std::fs::remove_file(json_path)?;
@@ -173,7 +173,7 @@ rules:
     enabled: true
 "#;
 
-    let loader = BundleLoader::new();
+    let loader = BundleLoader::new().expect("Failed to create loader");
     let result = loader.load_blob(yaml_content, BundleFormat::Yaml);
 
     assert!(result.is_ok());
@@ -184,7 +184,7 @@ rules:
 
 #[test]
 fn test_rule_metadata_preservation() {
-    let loader = BundleLoader::new();
+    let loader = BundleLoader::new().expect("Failed to create loader");
     let result = loader.load_file("tests/bundle_example.yaml");
 
     assert!(result.is_ok());
@@ -199,7 +199,7 @@ fn test_rule_metadata_preservation() {
 
 #[test]
 fn test_unsupported_file_format() {
-    let loader = BundleLoader::new();
+    let loader = BundleLoader::new().expect("Failed to create loader");
 
     // Create a file with unsupported extension
     let result = loader.load_file("tests/bundle_example.txt");

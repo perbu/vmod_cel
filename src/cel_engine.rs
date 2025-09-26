@@ -4,7 +4,6 @@ use crate::safety_limits::{CostTracker, SafetyError, SafetyLimits};
 use anyhow::Result;
 use cel::{Context, Program};
 use std::panic;
-use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
 
@@ -63,11 +62,35 @@ impl CelRustEngine {
 
 
     /// Create a CEL evaluation context from request attributes
-    fn create_eval_context(&self, _attrs: &RequestAttrs) -> Result<Context, CelError> {
-        let eval_context = Context::default();
+    fn create_eval_context(&self, attrs: &RequestAttrs) -> Result<Context, CelError> {
+        let mut eval_context = Context::default();
 
-        // TODO: Add request data as variables once we understand the cel crate API better
-        // For now, return empty context
+        // Add request attributes as variables
+        eval_context.add_variable("method", attrs.method.as_str()).map_err(|e| CelError::EvaluationFailed {
+            message: format!("Failed to add method variable: {}", e),
+        })?;
+
+        eval_context.add_variable("path", attrs.path.as_str()).map_err(|e| CelError::EvaluationFailed {
+            message: format!("Failed to add path variable: {}", e),
+        })?;
+
+        if let Some(ref query) = attrs.query {
+            eval_context.add_variable("query", query.as_str()).map_err(|e| CelError::EvaluationFailed {
+                message: format!("Failed to add query variable: {}", e),
+            })?;
+        }
+
+        if let Some(ref client_ip) = attrs.client_ip {
+            eval_context.add_variable("client_ip", client_ip.as_str()).map_err(|e| CelError::EvaluationFailed {
+                message: format!("Failed to add client_ip variable: {}", e),
+            })?;
+        }
+
+        if let Some(ref user_agent) = attrs.user_agent {
+            eval_context.add_variable("user_agent", user_agent.as_str()).map_err(|e| CelError::EvaluationFailed {
+                message: format!("Failed to add user_agent variable: {}", e),
+            })?;
+        }
 
         Ok(eval_context)
     }

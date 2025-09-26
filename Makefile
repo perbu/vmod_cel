@@ -31,8 +31,8 @@ install-versioned: build
 	sudo ln -sf libvmod_cel.so.$(VERSION) /usr/lib/varnish/vmods/libvmod_cel.so
 	sudo ldconfig
 
-varnishtest:
-	varnishtest tests/*.vtc
+varnishtest: build
+	varnishtest -D vmod=$(PWD)/target/release/libvmod_cel.so tests/*.vtc
 
 all: fmt clippy test build
 

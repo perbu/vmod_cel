@@ -34,9 +34,6 @@ default = ["varnish-integration"]
 benchmarks-only = []
 varnish-integration = []
 
-[[example]]
-name = "cel_demo"
-path = "examples/cel_demo.rs"
 
 [profile.release]
 lto = true
