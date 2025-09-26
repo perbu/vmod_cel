@@ -19,7 +19,7 @@ clean:
 	cargo clean
 
 install: build
-	sudo cp target/release/libvmod_cel.so /usr/lib/varnish/vmods/
+	sudo cp target/release/libvmod_cel.so /usr/lib/varnish-plus/vmods/
 	sudo ldconfig
 
 # Install with versioned filename

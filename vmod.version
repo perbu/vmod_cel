@@ -1,4 +1,4 @@
-{
+VMOD_1.0 {
     global:
         # Export only the VMOD entry points and required symbols
         Vmod_cel_Data;
