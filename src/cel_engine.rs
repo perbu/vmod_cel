@@ -1,5 +1,5 @@
 use crate::policy_engine::PolicyEngine;
-use crate::request_attrs::RequestAttrs;
+use crate::request_attrs::{RequestAttrs, WsRequestAttrs};
 use crate::safety_limits::{CostTracker, SafetyError, SafetyLimits};
 use anyhow::Result;
 use cel::{Context, Program};
@@ -60,15 +60,62 @@ impl CelRustEngine {
         })
     }
 
-    /// Create a CEL evaluation context from request attributes
-    fn create_eval_context(&self, attrs: &RequestAttrs) -> Result<Context, CelError> {
-        let mut eval_context = Context::default();
+    /// Create a CEL evaluation context from workspace-backed request attributes
+    /// This version avoids some heap allocations by using pre-allocated strings
+    fn create_eval_context_ws(&self, attrs: &WsRequestAttrs) -> Result<Context, CelError> {
+        let mut eval_context = Context::default(); // TODO: Still allocates, but reduced string allocations
 
-        // Add request attributes as variables
+        // Add request attributes as variables using references to workspace strings
         eval_context
             .add_variable("method", attrs.method.as_str())
             .map_err(|e| CelError::EvaluationFailed {
                 message: format!("Failed to add method variable: {}", e),
+            })?;
+
+        eval_context
+            .add_variable("path", attrs.path.as_str())
+            .map_err(|e| CelError::EvaluationFailed {
+                message: format!("Failed to add path variable: {}", e),
+            })?;
+
+        if let Some(ref query) = attrs.query {
+            eval_context
+                .add_variable("query", query.as_str())
+                .map_err(|e| CelError::EvaluationFailed {
+                    message: format!("Failed to add query variable: {}", e),
+                })?;
+        }
+
+        if let Some(ref client_ip) = attrs.client_ip {
+            eval_context
+                .add_variable("client_ip", client_ip.as_str())
+                .map_err(|e| CelError::EvaluationFailed {
+                    message: format!("Failed to add client_ip variable: {}", e),
+                })?;
+        }
+
+        if let Some(ref user_agent) = attrs.user_agent {
+            eval_context
+                .add_variable("user_agent", user_agent.as_str())
+                .map_err(|e| CelError::EvaluationFailed {
+                    message: format!("Failed to add user_agent variable: {}", e),
+                })?;
+        }
+
+        Ok(eval_context)
+    }
+
+    /// Create a CEL evaluation context from request attributes
+    /// TODO: Context::default() allocates memory during request processing - should reuse or use workspace
+    fn create_eval_context(&self, attrs: &RequestAttrs) -> Result<Context, CelError> {
+        let mut eval_context = Context::default(); // TODO: Heap allocation
+
+        // Add request attributes as variables
+        // TODO: add_variable() may allocate memory for variable storage
+        eval_context
+            .add_variable("method", attrs.method.as_str())
+            .map_err(|e| CelError::EvaluationFailed {
+                message: format!("Failed to add method variable: {}", e), // TODO: String allocation in error
             })?;
 
         eval_context
@@ -123,6 +170,40 @@ impl CelRustEngine {
                 Err(CelError::PanicOccurred { message })
             }
         }
+    }
+
+    /// Evaluate a CEL program with workspace-backed request attributes
+    /// This version avoids some allocations by using workspace-allocated strings
+    pub fn eval_ws(&self, program: &Program, attrs: &WsRequestAttrs) -> Result<bool, CelError> {
+        let _start_time = Instant::now();
+        let mut _cost_tracker =
+            CostTracker::new(self.limits.max_eval_steps, self.limits.max_eval_time);
+
+        // Safely evaluate the expression
+        self.safe_execute("eval_ws", || {
+            // Create evaluation context with request data from workspace
+            let context = self.create_eval_context_ws(attrs)?;
+
+            // Execute the program
+            let result = program
+                .execute(&context)
+                .map_err(|e| CelError::EvaluationFailed {
+                    message: format!("CEL evaluation error: {}", e),
+                })?;
+
+            // Convert result to boolean
+            let boolean_result = match result {
+                cel::Value::Bool(b) => b,
+                cel::Value::Int(i) => i != 0,
+                cel::Value::UInt(u) => u != 0,
+                cel::Value::String(_) => true, // Non-empty string is truthy
+                cel::Value::List(_) => true,   // Non-empty list is truthy
+                cel::Value::Map(_) => true,    // Non-empty map is truthy
+                _ => false,
+            };
+
+            Ok(boolean_result)
+        })
     }
 }
 
