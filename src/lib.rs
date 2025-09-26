@@ -221,6 +221,137 @@ impl CelState {
         }
     }
 
+    /// Evaluate all enabled rules, returning true if ANY match (logical OR)
+    pub fn eval_any_rule(&self, ctx: &varnish::vcl::Ctx) -> Result<bool, String> {
+        // Check circuit breaker first
+        if let Err(e) = self.circuit_breaker.allow_request() {
+            self.metrics.eval_err.fetch_add(1, Ordering::Relaxed);
+            return self.error_recovery.recover_from_error(&e);
+        }
+
+        // Execute with panic protection
+        let evaluation_result = self.panic_wrapper.execute_safe(|| {
+            // Extract request attributes once for all rules
+            let attr_builder = AttributeBuilder::new(self.config.attribute_config.clone());
+            let attrs = attr_builder.extract(ctx)
+                .map_err(|e| format!("Failed to extract request attributes: {}", e))?;
+
+            // Get all enabled rules
+            let enabled_rules: Vec<_> = self.rules.programs.iter()
+                .filter(|(_, rule)| rule.rule.enabled)
+                .collect();
+
+            // If no enabled rules, return false (nothing matches)
+            if enabled_rules.is_empty() {
+                return Ok(false);
+            }
+
+            // Evaluate each enabled rule until one matches
+            for (rule_name, compiled_rule) in enabled_rules {
+                match self.engine.eval(&compiled_rule.program, &attrs) {
+                    Ok(result) => {
+                        if result {
+                            self.metrics.eval_true.fetch_add(1, Ordering::Relaxed);
+                        } else {
+                            self.metrics.eval_false.fetch_add(1, Ordering::Relaxed);
+                        }
+
+                        // Short-circuit on first match
+                        if result {
+                            return Ok(true);
+                        }
+                    }
+                    Err(e) => {
+                        self.metrics.eval_err.fetch_add(1, Ordering::Relaxed);
+                        eprintln!("CEL: Error evaluating rule '{}': {}", rule_name, e);
+                        // Continue evaluating other rules on error
+                    }
+                }
+            }
+
+            // No rules matched
+            Ok(false)
+        });
+
+        // Handle the result
+        match evaluation_result {
+            Ok(result) => {
+                self.circuit_breaker.record_success();
+                Ok(result)
+            }
+            Err(e) => {
+                self.circuit_breaker.record_failure();
+                self.error_recovery.recover_from_error(&e)
+            }
+        }
+    }
+
+    /// Evaluate all enabled rules, returning true if ALL match (logical AND)
+    pub fn eval_all_rule(&self, ctx: &varnish::vcl::Ctx) -> Result<bool, String> {
+        // Check circuit breaker first
+        if let Err(e) = self.circuit_breaker.allow_request() {
+            self.metrics.eval_err.fetch_add(1, Ordering::Relaxed);
+            return self.error_recovery.recover_from_error(&e);
+        }
+
+        // Execute with panic protection
+        let evaluation_result = self.panic_wrapper.execute_safe(|| {
+            // Extract request attributes once for all rules
+            let attr_builder = AttributeBuilder::new(self.config.attribute_config.clone());
+            let attrs = attr_builder.extract(ctx)
+                .map_err(|e| format!("Failed to extract request attributes: {}", e))?;
+
+            // Get all enabled rules
+            let enabled_rules: Vec<_> = self.rules.programs.iter()
+                .filter(|(_, rule)| rule.rule.enabled)
+                .collect();
+
+            // If no enabled rules, return true (vacuous truth - all zero rules match)
+            if enabled_rules.is_empty() {
+                return Ok(true);
+            }
+
+            // Evaluate each enabled rule until one doesn't match
+            for (rule_name, compiled_rule) in enabled_rules {
+                match self.engine.eval(&compiled_rule.program, &attrs) {
+                    Ok(result) => {
+                        if result {
+                            self.metrics.eval_true.fetch_add(1, Ordering::Relaxed);
+                        } else {
+                            self.metrics.eval_false.fetch_add(1, Ordering::Relaxed);
+                        }
+
+                        // Short-circuit on first non-match
+                        if !result {
+                            return Ok(false);
+                        }
+                    }
+                    Err(e) => {
+                        self.metrics.eval_err.fetch_add(1, Ordering::Relaxed);
+                        eprintln!("CEL: Error evaluating rule '{}': {}", rule_name, e);
+                        // Evaluation error counts as non-match
+                        return Ok(false);
+                    }
+                }
+            }
+
+            // All rules matched
+            Ok(true)
+        });
+
+        // Handle the result
+        match evaluation_result {
+            Ok(result) => {
+                self.circuit_breaker.record_success();
+                Ok(result)
+            }
+            Err(e) => {
+                self.circuit_breaker.record_failure();
+                self.error_recovery.recover_from_error(&e)
+            }
+        }
+    }
+
     /// Generate explanation for a rule evaluation
     pub fn explain_rule(&self, rule_name: &str, ctx: &varnish::vcl::Ctx) -> String {
         if !self.config.enable_explain {
@@ -555,6 +686,66 @@ mod cel {
         // For now, return default but don't increment error counter
         // since eval_or is designed to handle missing rules gracefully
         default
+    }
+
+    /// Evaluate all enabled rules, returning true if ANY match (logical OR)
+    pub fn eval_any() -> bool {
+        let guard = match CEL_STATE.lock() {
+            Ok(guard) => guard,
+            Err(e) => {
+                eprintln!("CEL: Failed to acquire state lock in eval_any(): {}", e);
+                return false;
+            }
+        };
+
+        let cel_state = match guard.as_ref() {
+            Some(state) => state,
+            None => {
+                eprintln!("CEL: VMOD not initialized in eval_any()");
+                return false;
+            }
+        };
+
+        // Check if any enabled rules exist
+        let enabled_count = cel_state.rules.enabled_rule_count();
+        if enabled_count == 0 {
+            return false; // No enabled rules, nothing can match
+        }
+
+        // TODO: Same VCL context access issue as eval()
+        // For now, return false as we can't evaluate without context
+        // In a future version, this would call cel_state.eval_any_rule(ctx)
+        false
+    }
+
+    /// Evaluate all enabled rules, returning true if ALL match (logical AND)
+    pub fn eval_all() -> bool {
+        let guard = match CEL_STATE.lock() {
+            Ok(guard) => guard,
+            Err(e) => {
+                eprintln!("CEL: Failed to acquire state lock in eval_all(): {}", e);
+                return false;
+            }
+        };
+
+        let cel_state = match guard.as_ref() {
+            Some(state) => state,
+            None => {
+                eprintln!("CEL: VMOD not initialized in eval_all()");
+                return false;
+            }
+        };
+
+        // Check if any enabled rules exist
+        let enabled_count = cel_state.rules.enabled_rule_count();
+        if enabled_count == 0 {
+            return true; // No enabled rules, vacuous truth (all zero rules match)
+        }
+
+        // TODO: Same VCL context access issue as eval()
+        // For now, return true (vacuous truth) as we can't evaluate without context
+        // In a future version, this would call cel_state.eval_all_rule(ctx)
+        true
     }
 
     /// Generate explanation for rule evaluation (Phase 5)

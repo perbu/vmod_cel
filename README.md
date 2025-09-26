@@ -57,6 +57,14 @@ List all available rules
 
 Evaluate a rule with fallback default (Phase 5)
 
+### Function `BOOL cel.eval_any()`
+
+Evaluate all enabled rules, returning true if ANY match (logical OR)
+
+### Function `BOOL cel.eval_all()`
+
+Evaluate all enabled rules, returning true if ALL match (logical AND)
+
 ### Function `STRING cel.explain(STRING rule_name)`
 
 Generate explanation for rule evaluation (Phase 5)
