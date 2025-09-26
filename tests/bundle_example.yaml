@@ -1,0 +1,30 @@
+version: 1
+metadata:
+  name: "Example Security Rules"
+  description: "Basic security rules for demonstration"
+  author: "Security Team"
+  bundle_version: "1.0.0"
+rules:
+  - name: block_scanners
+    expr: "true"
+    description: "Block automated security scanners"
+    enabled: true
+    tags: ["security", "scanner-detection"]
+
+  - name: block_admin_paths
+    expr: "false"
+    description: "Block access to admin paths"
+    enabled: true
+    tags: ["security", "admin-protection"]
+
+  - name: rate_limit_api
+    expr: "1 + 1 == 2"
+    description: "Identify API POST requests for rate limiting"
+    enabled: false
+    tags: ["rate-limiting", "api"]
+
+  - name: block_suspicious_ips
+    expr: "2 > 1"
+    description: "Block requests from suspicious IP ranges"
+    enabled: true
+    tags: ["security", "ip-filtering"]

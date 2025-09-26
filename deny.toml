@@ -1,0 +1,132 @@
+# Configuration for cargo-deny security audit
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# If 1 or more target triples are specified, only the dependencies for those
+# target triples will be checked. This means, if a particular package is only
+# ever used as a target specific dependency, such as the `nix` crate only being
+# used on unix targets, it will be ignored, as the target list doesn't include
+# a unix target triple
+targets = [
+    # The triple you want to check for
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+
+[advisories]
+# The path where the advisory database is cloned/fetched into
+db-path = "~/.cargo/advisory-db"
+# The url(s) of the advisory databases to use
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# The lint level for security vulnerabilities
+vulnerability = "deny"
+# The lint level for unmaintained crates
+unmaintained = "warn"
+# The lint level for crates that have been yanked from their source registry
+yanked = "warn"
+# The lint level for crates with security notices
+notice = "warn"
+# A list of advisory IDs to ignore. Note that ignored advisories will still
+# output a note when they are encountered.
+ignore = [
+    # Waiting for a new version of the cel crate or similar
+    # "RUSTSEC-XXXX-XXXX", # Uncomment and add actual advisory IDs if needed
+]
+
+[licenses]
+# The lint level for crates which do not have a detectable license
+unlicensed = "deny"
+# List of explicitly allowed licenses
+# See https://spdx.org/licenses/ for list of possible licenses
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    # Varnish and varnish-rs specific licenses
+    "BSD-2-Clause-FreeBSD",
+]
+# List of explicitly disallowed licenses
+deny = [
+    "GPL-2.0",
+    "GPL-3.0",
+    "AGPL-1.0",
+    "AGPL-3.0",
+]
+# Lint level for when multiple versions of the same license are detected
+copyleft = "warn"
+# The confidence threshold for detecting a license from a license text.
+# Expressed as a floating point number in [0.0, 1.0] (inclusive)
+confidence-threshold = 0.8
+
+[licenses.private]
+# If true, ignores workspace crates that aren't published, or are only
+# published to private registries.
+# To see how to mark a crate as unpublished (to the public registry),
+# visit https://doc.rust-lang.org/cargo/reference/manifest.html#the-publish-field.
+ignore = false
+# One or more registries that you want to ignore crates from when
+# they're marked as unpublished. Can be useful if you want to allow
+# crates published to `my-private-registry`, but not crates published
+# to the public registry.
+registries = [
+    #"https://sekretz.com/registry"
+]
+
+[bans]
+# Lint level for when multiple versions of the same crate are detected
+multiple-versions = "warn"
+# Lint level for when a crate version requirement is `*`
+wildcards = "allow"
+# The graph highlighting used when creating dotgraphs for crates
+# with multiple versions
+highlight = "all"
+# The default lint level for `default` features for crates that are members
+# of the workspace that is being checked. This can be overridden by
+# the `workspace-default-features` setting in a crate's `[bans.workspace-features]`
+workspace-default-features = "allow"
+# The default lint level for `default` features for external crates that are not
+# members of the workspace. This can be overridden by the `external-default-features`
+# setting in a crate's `[bans.external-features]`.
+external-default-features = "allow"
+
+# List of crates that are allowed. Use with care!
+allow = [
+    #{ name = "ansi_term", version = "=0.11.0" },
+]
+
+# List of crates to deny
+deny = [
+    # See https://github.com/rust-random/rand/issues/645
+    #{ name = "rand", version = "=0.6.0" },
+    # Crates known to have issues
+    { name = "openssl", version = "*" }, # We want to avoid OpenSSL dependencies
+    { name = "openssl-sys", version = "*" },
+]
+
+# Certain crates/versions that will be skipped when doing duplicate detection.
+skip = [
+    #{ name = "ansi_term", version = "=0.11.0" },
+]
+
+# Similarly to `skip` allows you to skip certain crates from being checked. Unlike
+# `skip`, a `skip-tree` is an entire tree of dependencies, not just a single crate.
+skip-tree = [
+    #{ name = "ansi_term", version = "=0.11.0", depth = 20 },
+]
+
+[sources]
+# Lint level for what to happen when a crate from a crate registry that is
+# not in the allow list is encountered
+unknown-registry = "warn"
+# Lint level for what to happen when a crate from a git repository that is not
+# in the allow list is encountered
+unknown-git = "warn"
+# List of URLs for allowed crate registries. Defaults to the crates.io index
+# if not specified. If it is specified but empty, no registries are allowed.
+allow-registry = ["https://index.crates.io/"]
+# List of URLs for allowed Git repositories
+allow-git = []

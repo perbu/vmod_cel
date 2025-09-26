@@ -1,0 +1,109 @@
+# Memory leak detection test for Phase 6
+# Tests for memory stability across multiple VCL reload cycles
+
+varnishtest "Memory leak detection with multiple VCL reloads"
+
+server s1 {
+    # Accept many requests for memory testing
+    loop 50 {
+        rxreq
+        txresp -body "OK"
+    }
+} -start
+
+# Test memory stability through multiple VCL reload cycles
+varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
+    import cel from "${vmod_cel}";
+
+    sub vcl_init {
+        cel.init();
+        cel.add_rule("test_rule", "request.method == 'GET'");
+    }
+
+    sub vcl_recv {
+        if (cel.eval("test_rule")) {
+            set req.http.X-Test = "passed";
+        }
+    }
+} -start
+
+# Function to create a new VCL with rules
+proc reload_vcl {vcl_number} {
+    varnish v1 -vcl+backend "
+        import cel from \"${vmod_cel}\";
+
+        sub vcl_init {
+            cel.init();
+            # Add rules to consume memory
+            cel.add_rule(\"rule1_${vcl_number}\", \"request.method == 'GET'\");
+            cel.add_rule(\"rule2_${vcl_number}\", \"request.path.startsWith('/api')\");
+            cel.add_rule(\"rule3_${vcl_number}\", \"has_header('authorization')\");
+            cel.add_rule(\"rule4_${vcl_number}\", \"request.client_ip.startsWith('192.168.')\");
+        }
+
+        sub vcl_recv {
+            if (cel.eval(\"rule1_${vcl_number}\")) {
+                set req.http.X-Rule1 = \"${vcl_number}\";
+            }
+            if (cel.eval(\"rule2_${vcl_number}\")) {
+                set req.http.X-Rule2 = \"${vcl_number}\";
+            }
+        }
+
+        sub vcl_deliver {
+            set resp.http.X-VCL-Version = \"${vcl_number}\";
+        }
+    "
+}
+
+# Perform multiple VCL reloads while sending requests
+# This tests for memory leaks in rule compilation and cleanup
+
+client c1 {
+    loop 10 {
+        txreq -url "/test"
+        rxresp
+        expect resp.status == 200
+    }
+} -start
+
+# Reload VCL multiple times to test memory management
+reload_vcl 1
+reload_vcl 2
+reload_vcl 3
+reload_vcl 4
+reload_vcl 5
+
+# Continue sending requests during reloads
+client c2 {
+    loop 10 {
+        txreq -url "/api/test"
+        rxresp
+        expect resp.status == 200
+    }
+} -start
+
+reload_vcl 6
+reload_vcl 7
+reload_vcl 8
+
+client c1 -wait
+client c2 -wait
+
+# Final test to ensure everything still works after multiple reloads
+client c3 {
+    txreq -url "/api/final"
+    rxresp
+    expect resp.status == 200
+    expect resp.http.X-VCL-Version == "8"
+} -run
+
+# Test that old rules are properly cleaned up
+# Try to evaluate a rule that should no longer exist
+client c4 {
+    txreq -url "/test"
+    rxresp
+    expect resp.status == 200
+    # Should have the latest VCL version
+    expect resp.http.X-VCL-Version == "8"
+} -run

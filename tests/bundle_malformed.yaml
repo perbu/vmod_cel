@@ -1,0 +1,10 @@
+version: 2  # Unsupported version
+rules:
+  - name: duplicate_rule
+    expr: "true"
+  - name: duplicate_rule  # Duplicate name
+    expr: "false"
+  - name: ""  # Empty name
+    expr: "true"
+  - name: empty_expr
+    expr: ""  # Empty expression

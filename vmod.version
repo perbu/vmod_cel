@@ -1,0 +1,14 @@
+{
+    global:
+        # Export only the VMOD entry points and required symbols
+        Vmod_cel_Data;
+        Vmod_cel_Func;
+        vmod_*;
+
+        # C library symbols that might be needed
+        # (Add specific symbols here if linker errors occur)
+
+    local:
+        # Hide all other symbols
+        *;
+};

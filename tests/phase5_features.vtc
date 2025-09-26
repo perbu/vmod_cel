@@ -1,0 +1,188 @@
+varnishtest "Phase 5 VCL Integration Features"
+
+server s1 {
+    rxreq
+    txresp
+} -start
+
+varnish v1 -vcl+backend {
+    import cel from "${vmod}";
+
+    sub vcl_init {
+        cel.init();
+        cel.set_explain_mode(false);
+    }
+
+    sub vcl_recv {
+        # Test basic eval function
+        if (cel.eval("nonexistent_rule")) {
+            return (synth(500, "Should not reach here"));
+        }
+
+        # Test eval_or with default false
+        if (cel.eval_or("nonexistent_rule", false)) {
+            return (synth(500, "Should not reach here"));
+        }
+
+        # Test eval_or with default true
+        if (cel.eval_or("nonexistent_rule", true)) {
+            set req.http.X-Eval-Or-Works = "true";
+        }
+
+        # Test explain mode disabled
+        set req.http.X-Explain-Empty = cel.explain("nonexistent_rule");
+
+        # Enable explain mode and test again
+        cel.set_explain_mode(true);
+        set req.http.X-Explain-With-Mode = cel.explain("nonexistent_rule");
+
+        return (pass);
+    }
+
+    sub vcl_deliver {
+        # Pass through test headers
+        if (req.http.X-Eval-Or-Works) {
+            set resp.http.X-Eval-Or-Works = req.http.X-Eval-Or-Works;
+        }
+        set resp.http.X-Explain-Empty = req.http.X-Explain-Empty;
+        set resp.http.X-Explain-With-Mode = req.http.X-Explain-With-Mode;
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+    expect resp.status == 200
+    expect resp.http.X-Eval-Or-Works == "true"
+    expect resp.http.X-Explain-Empty == ""
+    expect resp.http.X-Explain-With-Mode == ""
+} -run
+
+# Test rule loading and evaluation
+varnish v1 -vcl+backend {
+    import cel from "${vmod}";
+
+    sub vcl_init {
+        cel.init();
+        # Add a test rule directly
+        cel.add_rule("test_rule", "true");
+        cel.set_explain_mode(true);
+    }
+
+    sub vcl_recv {
+        # Test eval with existing rule
+        if (!cel.eval("test_rule")) {
+            return (synth(500, "Test rule should return true"));
+        }
+
+        # Test eval_or with existing rule
+        if (!cel.eval_or("test_rule", false)) {
+            return (synth(500, "Test rule should return true"));
+        }
+
+        # Test explain with existing rule
+        set req.http.X-Explain-Result = cel.explain("test_rule");
+
+        return (pass);
+    }
+
+    sub vcl_deliver {
+        set resp.http.X-Explain-Result = req.http.X-Explain-Result;
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+    expect resp.status == 200
+    # Should contain rule information
+    expect resp.http.X-Explain-Result ~ "test_rule"
+} -run
+
+# Test error handling and state management
+varnish v1 -vcl+backend {
+    import cel from "${vmod}";
+
+    sub vcl_init {
+        cel.init();
+    }
+
+    sub vcl_recv {
+        # Test functions with empty rule set
+        if (cel.eval("missing_rule")) {
+            return (synth(500, "Missing rule should return false"));
+        }
+
+        # Test eval_or graceful handling
+        if (!cel.eval_or("missing_rule", true)) {
+            return (synth(500, "eval_or should return default true"));
+        }
+
+        # Test explain mode toggle
+        cel.set_explain_mode(true);
+        set req.http.X-Explain-1 = cel.explain("missing_rule");
+
+        cel.set_explain_mode(false);
+        set req.http.X-Explain-2 = cel.explain("missing_rule");
+
+        return (pass);
+    }
+
+    sub vcl_deliver {
+        set resp.http.X-Explain-Enabled = req.http.X-Explain-1;
+        set resp.http.X-Explain-Disabled = req.http.X-Explain-2;
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+    expect resp.status == 200
+    # When explain is disabled, should return empty string
+    expect resp.http.X-Explain-Enabled == ""
+    expect resp.http.X-Explain-Disabled == ""
+} -run
+
+# Test metrics and debugging functions
+varnish v1 -vcl+backend {
+    import cel from "${vmod}";
+
+    sub vcl_init {
+        cel.init();
+        cel.add_rule("always_true", "true");
+        cel.add_rule("always_false", "false");
+    }
+
+    sub vcl_recv {
+        # Generate some metrics
+        cel.eval("always_true");
+        cel.eval("always_false");
+        cel.eval("nonexistent");
+        cel.eval_or("nonexistent", true);
+
+        set req.http.X-Metrics = cel.metrics_summary();
+        set req.http.X-Rules = cel.list_rules();
+        set req.http.X-Config = cel.debug_config();
+        set req.http.X-Rule-Info = cel.rule_info("always_true");
+
+        return (pass);
+    }
+
+    sub vcl_deliver {
+        set resp.http.X-Metrics = req.http.X-Metrics;
+        set resp.http.X-Rules = req.http.X-Rules;
+        set resp.http.X-Config = req.http.X-Config;
+        set resp.http.X-Rule-Info = req.http.X-Rule-Info;
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+    expect resp.status == 200
+    # Should contain metrics information
+    expect resp.http.X-Metrics ~ "Compiles OK:"
+    expect resp.http.X-Rules ~ "always_true"
+    expect resp.http.X-Config ~ "Extract cookies:"
+    expect resp.http.X-Rule-Info ~ "always_true"
+} -run

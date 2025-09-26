@@ -1,0 +1,163 @@
+# Load testing framework for Phase 6
+# Tests rule evaluation under concurrent load and rule reloads
+
+varnishtest "Load testing with concurrent requests and rule reloads"
+
+# Start Varnish with VMOD
+server s1 {
+    rxreq
+    expect req.url == "/test1"
+    txresp -body "Response 1"
+
+    rxreq
+    expect req.url == "/test2"
+    txresp -body "Response 2"
+
+    rxreq
+    expect req.url == "/test3"
+    txresp -body "Response 3"
+} -start
+
+varnish v1 -vcl+backend {
+    import cel from "${vmod_cel}";
+
+    sub vcl_init {
+        cel.init();
+        # Add basic test rules
+        cel.add_rule("allow_get", "request.method == 'GET'");
+        cel.add_rule("block_admin", "request.path.startsWith('/admin')");
+    }
+
+    sub vcl_recv {
+        # Test rule evaluation under load
+        if (cel.eval("allow_get")) {
+            set req.http.X-Rule-Result = "get_allowed";
+        }
+
+        if (cel.eval("block_admin")) {
+            return (synth(403, "Blocked"));
+        }
+    }
+
+    sub vcl_deliver {
+        set resp.http.X-Rule-Result = req.http.X-Rule-Result;
+    }
+} -start
+
+# Test 1: Basic load with concurrent requests
+client c1 {
+    txreq -url "/test1"
+    rxresp
+    expect resp.status == 200
+    expect resp.http.X-Rule-Result == "get_allowed"
+} -start
+
+client c2 {
+    txreq -url "/test2"
+    rxresp
+    expect resp.status == 200
+    expect resp.http.X-Rule-Result == "get_allowed"
+} -start
+
+client c3 {
+    txreq -url "/test3"
+    rxresp
+    expect resp.status == 200
+    expect resp.http.X-Rule-Result == "get_allowed"
+} -start
+
+# Wait for all clients to complete
+client c1 -wait
+client c2 -wait
+client c3 -wait
+
+# Test 2: Admin path blocking
+client c4 {
+    txreq -url "/admin/users"
+    rxresp
+    expect resp.status == 403
+} -run
+
+# Test 3: Rule reload during traffic
+# This tests memory safety during hot-swapping
+
+client c5 {
+    # Start continuous requests
+    txreq -url "/continuous1"
+    rxresp
+    expect resp.status == 200
+} -start
+
+# Reload rules while traffic is flowing
+varnish v1 -vcl+backend {
+    import cel from "${vmod_cel}";
+
+    sub vcl_init {
+        cel.init();
+        # Add updated rules
+        cel.add_rule("allow_get", "request.method == 'GET'");
+        cel.add_rule("block_admin", "request.path.startsWith('/admin')");
+        cel.add_rule("new_rule", "request.path == '/new'");
+    }
+
+    sub vcl_recv {
+        if (cel.eval("allow_get")) {
+            set req.http.X-Rule-Result = "get_allowed";
+        }
+
+        if (cel.eval("block_admin")) {
+            return (synth(403, "Blocked"));
+        }
+
+        if (cel.eval("new_rule")) {
+            set req.http.X-Rule-Result = "new_rule_matched";
+        }
+    }
+
+    sub vcl_deliver {
+        set resp.http.X-Rule-Result = req.http.X-Rule-Result;
+    }
+}
+
+client c5 -wait
+
+# Test new rule after reload
+client c6 {
+    txreq -url "/new"
+    rxresp
+    expect resp.status == 200
+    expect resp.http.X-Rule-Result == "new_rule_matched"
+} -run
+
+# Test 4: Stress test with many concurrent clients
+# This tests for memory leaks and race conditions
+
+client c7 -repeat 5 {
+    txreq -url "/stress/test"
+    rxresp
+    expect resp.status == 200
+} -start
+
+client c8 -repeat 5 {
+    txreq -url "/stress/test"
+    rxresp
+    expect resp.status == 200
+} -start
+
+client c9 -repeat 5 {
+    txreq -url "/stress/test"
+    rxresp
+    expect resp.status == 200
+} -start
+
+client c10 -repeat 5 {
+    txreq -url "/stress/test"
+    rxresp
+    expect resp.status == 200
+} -start
+
+# Wait for stress test to complete
+client c7 -wait
+client c8 -wait
+client c9 -wait
+client c10 -wait

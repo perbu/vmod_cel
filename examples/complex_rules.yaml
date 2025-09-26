@@ -1,0 +1,264 @@
+# Complex CEL Rules Example
+# Advanced enterprise-grade rules with sophisticated logic and multiple conditions
+
+metadata:
+  name: "enterprise_security_suite"
+  description: "Complex enterprise security rules with advanced threat detection"
+  version: "3.2.1"
+  author: "vmod_cel example"
+  tags: ["enterprise", "advanced-security", "threat-detection"]
+
+rules:
+  # Multi-vector attack detection
+  - name: "advanced_threat_detection"
+    description: "Detect sophisticated multi-vector attacks"
+    expression: |
+      (
+        // Anomalous request patterns
+        (
+          size(request.headers) > 50 ||
+          size(request.path) > 1000 ||
+          size(request.query.toString()) > 5000 ||
+          request.headers.keys().filter(k, k.matches("(?i)x-[a-z0-9-]{20,}")).size() > 10
+        ) &&
+        // Combined with suspicious characteristics
+        (
+          request.user_agent.matches("(?i)(python|curl|wget|scanner|test|exploit)") ||
+          request.path.matches("(?i)(\\.\\./|\\.\\\\|/etc/|/proc/|/sys/|/dev/|\\\\windows\\\\|c:\\\\)") ||
+          request.query.toString().matches("(?i)(base64|eval\\(|exec\\(|system\\(|shell_exec)")
+        )
+      ) ||
+      (
+        // High-entropy parameter values (potential encoding attacks)
+        request.query.values().exists(v,
+          size(v) > 100 &&
+          v.matches("^[A-Za-z0-9+/=]{50,}$")
+        ) &&
+        // Without legitimate content type
+        !request.headers.get("content-type", "").contains("multipart/form-data")
+      )
+    enabled: true
+    tags: ["security", "advanced-threat", "anomaly-detection"]
+
+  # Behavioral analysis for API abuse
+  - name: "api_abuse_behavioral_analysis"
+    description: "Detect API abuse through behavioral patterns"
+    expression: |
+      request.path.startsWith("/api/") &&
+      (
+        // Rapid sequential requests pattern
+        (
+          request.path.matches("/api/v[0-9]+/(search|list|query)") &&
+          size(request.query) > 0 &&
+          request.query.toString().matches("(limit|per_page|count)=([5-9][0-9]{2,}|[1-9][0-9]{3,})")
+        ) ||
+        // Enumeration attacks
+        (
+          request.path.matches("/api/v[0-9]+/(user|account|profile)/[0-9]+") &&
+          int(request.path.split("/").last()) > 1000000
+        ) ||
+        // Data scraping patterns
+        (
+          request.path.matches("/api/v[0-9]+/(products|items|listings)") &&
+          has_header("Range") &&
+          !request.user_agent.matches("(?i)(mobile|android|iphone|ipad)")
+        ) ||
+        // Suspicious parameter combinations
+        (
+          request.query.keys().size() > 20 ||
+          request.query.keys().filter(k, k.matches("^[a-z]$")).size() > 10 ||
+          request.query.values().exists(v, v.matches("\\*|%|_|\\[\\]|\\{\\}"))
+        )
+      )
+    enabled: true
+    tags: ["security", "api-abuse", "behavioral", "scraping"]
+
+  # Geographic and temporal anomaly detection
+  - name: "geo_temporal_anomaly"
+    description: "Detect geographic and temporal access anomalies"
+    expression: |
+      has_header("X-Forwarded-For") &&
+      (
+        // Multiple IPs in forwarded chain (potential proxy chaining)
+        size(request.headers.get("x-forwarded-for", "").split(",")) > 3 ||
+        // Tor exit node patterns
+        request.headers.get("x-forwarded-for", "").matches("(^|,)\\s*(10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.)") ||
+        // Inconsistent geographic headers
+        (
+          has_header("CF-IPCountry") &&
+          has_header("Accept-Language") &&
+          !request.headers.get("accept-language", "").toLowerCase().startsWith(request.headers.get("cf-ipcountry", "").toLowerCase())
+        )
+      ) &&
+      // High-value endpoints
+      (
+        request.path.matches("/api/v[0-9]+/(payment|billing|account|admin|settings)") ||
+        request.path.contains("password") ||
+        request.path.contains("2fa") ||
+        request.path.contains("oauth")
+      )
+    enabled: true
+    tags: ["security", "geographic", "temporal", "proxy-detection"]
+
+  # Advanced injection attack detection
+  - name: "polyglot_injection_detection"
+    description: "Detect polyglot injection attacks across multiple languages"
+    expression: |
+      request.method == "POST" &&
+      (
+        // SQL + NoSQL injection combinations
+        request.query.toString().matches("(?i)((union|select).*(\\$where|\\$regex|\\$ne))|((\\$where|\\$regex).*(union|select))") ||
+        // XSS + LDAP injection
+        request.query.toString().matches("(?i)(<script.*>.*\\*\\)|\\(\\|.*<script)") ||
+        // Command injection + template injection
+        request.query.toString().matches("(?i)((\\||;|`|\\$\\().*\\{\\{)|(\\{\\{.*(\\||;|`|\\$\\())") ||
+        // XML + XXE + SSTI combination
+        request.query.toString().matches("(?i)(<!ENTITY.*\\{\\{|\\{\\{.*<!ENTITY|\\{%.*<!ENTITY|<!ENTITY.*\\{%)") ||
+        // Header injection attempts
+        request.headers.values().exists(v,
+          v.matches("(?i)(\\r\\n|\\n\\r|content-type:|location:|set-cookie:)") ||
+          v.matches("\\x00|\\x0a|\\x0d|\\x1a")
+        )
+      )
+    enabled: true
+    tags: ["security", "injection", "polyglot", "advanced-attack"]
+
+  # Machine learning model evasion detection
+  - name: "ml_evasion_detection"
+    description: "Detect attempts to evade ML-based security models"
+    expression: |
+      (
+        // Unusual encoding patterns
+        request.query.toString().matches("(%[0-9a-fA-F]{2}){10,}|(&[a-zA-Z0-9]+;){5,}") ||
+        // Unicode normalization attacks
+        request.query.toString().matches("[\u0300-\u036F\u1AB0-\u1AFF\u1DC0-\u1DFF\u20D0-\u20FF\uFE20-\uFE2F]") ||
+        // Case variation attacks
+        request.path.matches("(?i)[A-Z][a-z][A-Z][a-z][A-Z][a-z]") ||
+        // Homograph attacks
+        request.path.matches("[\u0430-\u044F\u0400-\u04FF]") ||  // Cyrillic
+        // Parameter pollution
+        request.query.toString().matches("([&?][^=]+=[^&]*){20,}")
+      ) &&
+      // Targeting security-sensitive endpoints
+      (
+        request.path.matches("/api/v[0-9]+/(auth|login|verify|validate|check)") ||
+        has_header("Authorization") ||
+        has_header("X-API-Key")
+      )
+    enabled: true
+    tags: ["security", "ml-evasion", "encoding", "obfuscation"]
+
+  # Zero-day exploit pattern detection
+  - name: "zero_day_exploit_patterns"
+    description: "Detect patterns commonly associated with zero-day exploits"
+    expression: |
+      (
+        // Unusual HTTP method combinations
+        request.method.matches("^(TRACE|CONNECT|PATCH|OPTIONS)$") &&
+        request.path.startsWith("/api/") ||
+        // Exploit kit signatures
+        request.user_agent.matches("(?i)(metasploit|burp|zap|sqlmap|w3af|havij|pangolin)") ||
+        // Memory corruption attempts
+        request.query.toString().matches("A{100,}|\\x41{50,}|%41{50,}") ||
+        // Format string attacks
+        request.query.toString().matches("(%[0-9]*[xXdDiIoOuUeEfFgGcs]){5,}") ||
+        // Buffer overflow patterns
+        request.headers.values().exists(v, size(v) > 8192) ||
+        // Shellcode patterns
+        request.query.toString().matches("\\\\x[0-9a-fA-F]{2}.*\\\\x[0-9a-fA-F]{2}.*\\\\x[0-9a-fA-F]{2}") ||
+        // ROP chain indicators
+        request.query.toString().matches("(pop|ret|jmp|call).*%[0-9a-fA-F]{8}")
+      )
+    enabled: true
+    tags: ["security", "zero-day", "exploit", "advanced-attack"]
+
+  # Business logic abuse detection
+  - name: "business_logic_abuse"
+    description: "Detect abuse of business logic and workflow manipulation"
+    expression: |
+      (
+        // Cart manipulation
+        (
+          request.path.matches("/api/v[0-9]+/(cart|order|checkout)") &&
+          request.method == "POST" &&
+          request.query.toString().matches("(price|amount|total|discount)=(-[0-9]+|0\\.0+[1-9]|0+\\.)")
+        ) ||
+        // Account privilege escalation
+        (
+          request.path.matches("/api/v[0-9]+/(user|account|profile)") &&
+          request.method.matches("PUT|PATCH") &&
+          request.query.toString().matches("(?i)(role|permission|admin|superuser|privileges)=(admin|root|superuser|true|1)")
+        ) ||
+        // Resource enumeration and timing attacks
+        (
+          request.path.matches("/api/v[0-9]+/(user|account|email)/exists") &&
+          request.method == "GET" &&
+          !has_header("X-Requested-With")
+        ) ||
+        // Workflow state manipulation
+        (
+          request.path.matches("/api/v[0-9]+/(order|payment|subscription)") &&
+          request.query.toString().matches("(?i)(status|state)=(completed|paid|active|approved)") &&
+          request.method.matches("PUT|PATCH")
+        )
+      )
+    enabled: true
+    tags: ["security", "business-logic", "abuse", "privilege-escalation"]
+
+  # Content Security Policy bypass attempts
+  - name: "csp_bypass_detection"
+    description: "Detect attempts to bypass Content Security Policy"
+    expression: |
+      (
+        // CSP header manipulation
+        request.path.matches("/api/v[0-9]+/(config|settings|security)") &&
+        request.query.toString().matches("(?i)(csp|content.security.policy)") ||
+        // JSONP callback manipulation
+        request.query.toString().matches("(?i)callback=.*[<>\"'\\(\\)\\{\\}\\[\\]\\\\]") ||
+        // Data URI schemes in parameters
+        request.query.toString().matches("(?i)data:.*[,;].*(<|javascript:|vbscript:)") ||
+        // Iframe sandbox escape attempts
+        request.query.toString().matches("(?i)(sandbox|allow.scripts|allow.same.origin).*=.*['\"]") ||
+        // WebSocket upgrade manipulation
+        (
+          has_header("Upgrade") &&
+          request.headers.upgrade.matches("(?i)websocket") &&
+          (!has_header("Sec-WebSocket-Key") || size(request.headers.get("sec-websocket-key", "")) != 24)
+        )
+      )
+    enabled: true
+    tags: ["security", "csp-bypass", "web-security", "client-side"]
+
+  # Advanced persistent threat (APT) indicators
+  - name: "apt_indicators"
+    description: "Detect indicators of Advanced Persistent Threats"
+    expression: |
+      (
+        // Beaconing patterns
+        (
+          request.path.matches("/[a-zA-Z0-9]{8,16}$") &&
+          request.method == "GET" &&
+          !has_header("Referer") &&
+          request.user_agent.matches("^Mozilla/[45]\\.[0-9]+")
+        ) ||
+        // Covert channel data exfiltration
+        (
+          request.method == "GET" &&
+          size(request.path) > 200 &&
+          request.path.matches("^/[a-zA-Z0-9+/=]+$")
+        ) ||
+        // Living-off-the-land techniques
+        (
+          request.path.matches("/api/v[0-9]+/(log|debug|info|status|health)") &&
+          request.query.toString().matches("(?i)(cmd|command|exec|system|powershell|bash|sh)") &&
+          request.method == "POST"
+        ) ||
+        // Steganographic communication patterns
+        (
+          request.path.matches("\\.(jpg|png|gif|pdf)$") &&
+          request.method == "PUT" &&
+          request.query.toString().matches("(?i)(data|payload|content)=.*[A-Za-z0-9+/=]{100,}")
+        )
+      )
+    enabled: false  # Disabled by default - may cause false positives in legitimate scenarios
+    tags: ["security", "apt", "advanced-threat", "steganography"]

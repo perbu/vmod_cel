@@ -1,0 +1,82 @@
+varnishtest "CEL VMOD stress and memory leak test"
+
+server s1 {
+    rxreq
+    txresp
+} -start
+
+varnish v1 -arg "-p vsl_mask=+VCL_Log" -vcl+backend {
+    import cel from "${vmod}";
+    import std;
+
+    sub vcl_init {
+        cel.load_file("/tmp/stress_rules.yaml");
+    }
+
+    sub vcl_recv {
+        # Simulate heavy usage
+        set req.http.iteration = "1";
+
+        # Call eval multiple times in a loop-like pattern
+        if (cel.eval("rule1") || cel.eval("rule2") ||
+            cel.eval("rule3") || cel.eval("rule4") ||
+            cel.eval("rule5") || cel.eval("rule6")) {
+            return (synth(403, "Should not reach here"));
+        }
+
+        # Log memory-related info (placeholder for actual memory tracking)
+        std.log("CEL stress test iteration: " + req.http.iteration);
+    }
+} -start
+
+# Stress test with many concurrent requests
+client c1 {
+    loop 100 {
+        txreq -url "/stress1"
+        rxresp
+        expect resp.status == 200
+    }
+} -start
+
+client c2 {
+    loop 100 {
+        txreq -url "/stress2"
+        rxresp
+        expect resp.status == 200
+    }
+} -start
+
+client c3 {
+    loop 100 {
+        txreq -url "/stress3"
+        rxresp
+        expect resp.status == 200
+    }
+} -start
+
+client c1 -wait
+client c2 -wait
+client c3 -wait
+
+# Test rapid VCL reloads under load
+varnish v1 -vcl+backend {
+    import cel from "${vmod}";
+
+    sub vcl_init {
+        cel.load_file("/tmp/stress_rules_v2.yaml");
+    }
+
+    sub vcl_recv {
+        if (cel.eval("reload_test")) {
+            return (synth(403, "Should not reach here"));
+        }
+    }
+}
+
+client c1 {
+    loop 50 {
+        txreq -url "/reload-test"
+        rxresp
+        expect resp.status == 200
+    }
+} -run

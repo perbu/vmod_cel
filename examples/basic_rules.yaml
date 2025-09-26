@@ -1,0 +1,44 @@
+# Basic CEL Rules Example
+# Simple rules for common HTTP filtering scenarios
+
+metadata:
+  name: "basic_security_rules"
+  description: "Basic security and filtering rules for web applications"
+  version: "1.0.0"
+  author: "vmod_cel example"
+
+rules:
+  # Block known bad user agents
+  - name: "block_bots"
+    description: "Block common malicious bots and scrapers"
+    expression: 'request.user_agent.matches("(?i)(bot|crawler|spider|scraper|wget|curl)")'
+    enabled: true
+    tags: ["security", "bots"]
+
+  # Allow only GET and POST methods
+  - name: "allowed_methods"
+    description: "Only allow GET and POST HTTP methods"
+    expression: 'request.method == "GET" || request.method == "POST"'
+    enabled: true
+    tags: ["security", "methods"]
+
+  # Block requests without User-Agent header
+  - name: "require_user_agent"
+    description: "Require User-Agent header to be present"
+    expression: 'has_header("User-Agent") && size(request.user_agent) > 0'
+    enabled: true
+    tags: ["security", "headers"]
+
+  # Health check endpoint - always allow
+  - name: "allow_health_check"
+    description: "Always allow health check endpoint"
+    expression: 'request.path == "/health" || request.path == "/ping"'
+    enabled: true
+    tags: ["health", "monitoring"]
+
+  # Block requests to admin paths from non-internal IPs
+  - name: "protect_admin"
+    description: "Block admin paths except from internal networks"
+    expression: 'request.path.startsWith("/admin") && !in_cidr(client_ip(), "192.168.0.0/16") && !in_cidr(client_ip(), "10.0.0.0/8")'
+    enabled: true
+    tags: ["security", "admin"]

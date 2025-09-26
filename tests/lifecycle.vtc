@@ -1,0 +1,85 @@
+varnishtest "CEL VMOD lifecycle test"
+
+server s1 {
+    rxreq
+    expect req.url == "/test"
+    txresp
+} -start
+
+varnish v1 -vcl+backend {
+    import cel from "${vmod}";
+
+    sub vcl_init {
+        cel.load_file("/tmp/test_rules.yaml");
+    }
+
+    sub vcl_recv {
+        if (cel.eval("always_false")) {
+            return (synth(403, "Should not reach here"));
+        }
+    }
+} -start
+
+client c1 {
+    txreq -url "/test"
+    rxresp
+    expect resp.status == 200
+} -run
+
+# Test VCL reload (lifecycle stress test)
+varnish v1 -vcl+backend {
+    import cel from "${vmod}";
+
+    sub vcl_init {
+        cel.load_file("/tmp/test_rules2.yaml");
+    }
+
+    sub vcl_recv {
+        if (cel.eval("test_rule")) {
+            return (synth(403, "Should not reach here"));
+        }
+    }
+}
+
+client c1 {
+    txreq -url "/test"
+    rxresp
+    expect resp.status == 200
+} -run
+
+# Test multiple reloads to check for memory leaks
+varnish v1 -vcl+backend {
+    import cel from "${vmod}";
+
+    sub vcl_init {
+        cel.load_file("/tmp/test_rules3.yaml");
+    }
+}
+
+varnish v1 -vcl+backend {
+    import cel from "${vmod}";
+
+    sub vcl_init {
+        cel.load_file("/tmp/test_rules4.yaml");
+    }
+}
+
+varnish v1 -vcl+backend {
+    import cel from "${vmod}";
+
+    sub vcl_init {
+        cel.load_file("/tmp/test_rules5.yaml");
+    }
+
+    sub vcl_recv {
+        if (cel.eval("final_test")) {
+            return (synth(403, "Should not reach here"));
+        }
+    }
+}
+
+client c1 {
+    txreq -url "/test"
+    rxresp
+    expect resp.status == 200
+} -run

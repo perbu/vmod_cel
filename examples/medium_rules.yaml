@@ -1,0 +1,113 @@
+# Medium Complexity CEL Rules Example
+# More sophisticated rules with multiple conditions and API-specific logic
+
+metadata:
+  name: "api_security_rules"
+  description: "API security and rate limiting rules with moderate complexity"
+  version: "2.1.0"
+  author: "vmod_cel example"
+
+rules:
+  # API authentication validation
+  - name: "api_auth_required"
+    description: "Require valid authentication for API endpoints"
+    expression: |
+      request.path.startsWith("/api/") &&
+      request.path != "/api/public/health" &&
+      (
+        !has_header("Authorization") ||
+        !request.headers.authorization.startsWith("Bearer ") ||
+        size(request.headers.authorization) < 20
+      )
+    enabled: true
+    tags: ["security", "api", "auth"]
+
+  # Rate limiting by IP and endpoint pattern
+  - name: "suspicious_activity"
+    description: "Detect suspicious activity patterns"
+    expression: |
+      (
+        request.path.matches("/api/v[0-9]+/(login|register|password-reset)") &&
+        request.method == "POST"
+      ) ||
+      (
+        request.path.contains("admin") &&
+        !in_cidr(client_ip(), "192.168.0.0/16")
+      ) ||
+      (
+        request.user_agent.matches("(?i)(sqlmap|nmap|nikto|dirb|gobuster)")
+      )
+    enabled: true
+    tags: ["security", "suspicious", "attack"]
+
+  # Content type validation for API endpoints
+  - name: "api_content_type_validation"
+    description: "Validate content type for API POST/PUT requests"
+    expression: |
+      request.path.startsWith("/api/") &&
+      (request.method == "POST" || request.method == "PUT") &&
+      request.path != "/api/upload" &&
+      (
+        !has_header("Content-Type") ||
+        (!request.headers.get("content-type", "").contains("application/json") &&
+         !request.headers.get("content-type", "").contains("application/x-www-form-urlencoded"))
+      )
+    enabled: true
+    tags: ["api", "validation", "content-type"]
+
+  # Geographic and time-based access control
+  - name: "restricted_access_hours"
+    description: "Block certain operations outside business hours from external IPs"
+    expression: |
+      request.path.matches("/api/v[0-9]+/(admin|config|users/bulk)") &&
+      !in_cidr(client_ip(), "192.168.0.0/16") &&
+      !in_cidr(client_ip(), "10.0.0.0/8") &&
+      (
+        int(timestamp() / 3600) % 24 < 8 ||
+        int(timestamp() / 3600) % 24 > 18
+      )
+    enabled: false  # Disabled by default - enable based on business requirements
+    tags: ["security", "time-based", "admin"]
+
+  # File upload security
+  - name: "file_upload_validation"
+    description: "Validate file upload requests"
+    expression: |
+      request.path.startsWith("/api/upload") &&
+      request.method == "POST" &&
+      (
+        !has_header("Content-Type") ||
+        request.headers.get("content-type", "").matches("(?i)(executable|script|php|jsp|asp)") ||
+        size(request.query.filename.matches("\\.(exe|bat|cmd|com|pif|scr|vbs|js|jar|php|jsp|asp)$")) > 0
+      )
+    enabled: true
+    tags: ["security", "upload", "file-validation"]
+
+  # API version deprecation
+  - name: "deprecated_api_version"
+    description: "Block requests to deprecated API versions"
+    expression: |
+      request.path.matches("/api/v[01]/") ||
+      request.headers.get("api-version", "").matches("^[01]\\.")
+    enabled: true
+    tags: ["api", "deprecation", "version"]
+
+  # Cross-site scripting (XSS) detection in query params
+  - name: "xss_in_query_params"
+    description: "Detect potential XSS attempts in query parameters"
+    expression: |
+      size(request.query) > 0 &&
+      request.query.toString().matches("(?i)(<script|javascript:|on\\w+\\s*=|<iframe|<object|<embed)")
+    enabled: true
+    tags: ["security", "xss", "query-params"]
+
+  # SQL injection detection
+  - name: "sql_injection_attempt"
+    description: "Detect potential SQL injection attempts"
+    expression: |
+      (
+        request.query.toString().matches("(?i)(union\\s+select|drop\\s+table|insert\\s+into|delete\\s+from|\\'\\s*or\\s*\\'|\\\"\\s*or\\s*\\\"|;\\s*(drop|insert|delete|update))") ||
+        request.path.matches("(?i)(union\\s+select|drop\\s+table|\\'\\s*or\\s*\\')")
+      )
+    enabled: true
+    tags: ["security", "sql-injection", "attack"]

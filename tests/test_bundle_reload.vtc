@@ -1,0 +1,68 @@
+varnishtest "Bundle loading and reloading during traffic"
+
+server s1 {
+    rxreq
+    txresp -status 200 -body "OK"
+} -start
+
+varnish v1 -arg "-p vcc_allow_inline_c=true" -vcl+backend {
+    import cel from "${vmod}";
+
+    sub vcl_init {
+        cel.init();
+        # Load initial bundle with security rules
+        cel.load_file("${testdir}/../tests/bundle_example.yaml");
+    }
+
+    sub vcl_recv {
+        # Test rule evaluation
+        if (cel.eval("block_scanners")) {
+            return (synth(403, "Blocked by scanner detection"));
+        }
+
+        if (cel.eval("block_admin_paths")) {
+            return (synth(403, "Admin access denied"));
+        }
+
+        # Check rule that should be disabled (rate_limit_api)
+        if (cel.eval("rate_limit_api")) {
+            return (synth(429, "Rate limited"));
+        }
+    }
+} -start
+
+# Test normal request - should pass
+client c1 {
+    txreq -url "/" -hdr "User-Agent: Mozilla/5.0"
+    rxresp
+    expect resp.status == 200
+} -run
+
+# Test scanner user agent - should be blocked
+client c2 {
+    txreq -url "/" -hdr "User-Agent: curl/7.68.0"
+    rxresp
+    expect resp.status == 403
+    expect resp.reason == "Blocked by scanner detection"
+} -run
+
+# Test admin path - should be blocked
+client c3 {
+    txreq -url "/admin/login" -hdr "User-Agent: Mozilla/5.0"
+    rxresp
+    expect resp.status == 403
+    expect resp.reason == "Admin access denied"
+} -run
+
+# Test disabled rule - should not trigger (pass through)
+client c4 {
+    txreq -req POST -url "/api/test" -hdr "User-Agent: Mozilla/5.0"
+    rxresp
+    expect resp.status == 200
+} -run
+
+# Verify metrics show rule evaluations
+varnish v1 -expect vmod_cel.metrics_summary() ~ "Evals True: [1-9]"
+
+# Test rule loading stats
+varnish v1 -expect vmod_cel.list_rules() ~ "Rules \\(3\\)"

@@ -1,0 +1,48 @@
+[package]
+name = "vmod_cel"
+version = "0.1.0"
+# Semantic versioning for VMOD API - see VERSIONING.md for policy
+edition = "2021"
+authors = ["vmod_cel contributors"]
+description = "Varnish CEL expression evaluation module"
+license = "BSD-2-Clause"
+
+[lib]
+name = "vmod_cel"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+varnish = "0.5.5"
+varnish-sys = "0.5.5"
+urlencoding = "2.1"
+cel = "0.11.2"             # CEL interpreter (latest stable)
+ipnet = "2.10"            # CIDR operations
+regex = "1.10"            # Regex support
+lazy_static = "1.5"       # Static regex compilation
+anyhow = "1.0"            # Error handling
+thiserror = "1.0"        # Custom error types
+serde = { version = "1.0", features = ["derive"] }  # Serialization
+serde_yaml = "0.9"       # YAML parsing
+serde_json = "1.0"       # JSON parsing
+
+[dev-dependencies]
+criterion = "0.5"
+tempfile = "3.8"         # Temporary files for tests
+
+[features]
+default = ["varnish-integration"]
+benchmarks-only = []
+varnish-integration = []
+
+[[example]]
+name = "cel_demo"
+path = "examples/cel_demo.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+# Strip symbols for smaller binaries
+strip = "symbols"
+# Enable static linking where possible
+opt-level = 3
